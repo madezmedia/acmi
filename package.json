@@ -1,0 +1,22 @@
+{
+  "name": "acmi",
+  "version": "1.0.0",
+  "description": "Agentic Context Management Infrastructure - A universal KV context engine for AI agents",
+  "main": "acmi.mjs",
+  "bin": {
+    "acmi": "./acmi.mjs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "context",
+    "llm",
+    "redis",
+    "upstash"
+  ],
+  "author": "Michael Shaw",
+  "license": "MIT"
+}
