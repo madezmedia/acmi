@@ -12,7 +12,7 @@ When agents try to understand a "deal", "support ticket", or "dispatch truck", t
 Agents don't need SQL joins. They need **state snapshots** and **chronological timelines**.
 
 ACMI uses a lightning-fast Key-Value store (Upstash Redis) to maintain the exact three things an LLM needs to make decisions:
-1. **Profile (Hard State):** Who/what is this entity?
+1. **Profile (Hard State):** Who/what is this entity? (Also used to store dynamic Agent operating rules/personas).
 2. **Signals (Soft State):** What does the AI think about this entity? (Sentiment, Risk, Next Actions)
 3. **Timeline (Event Stream):** What exactly has happened to this entity, in chronological order, across every platform?
 
@@ -66,15 +66,19 @@ export UPSTASH_REDIS_REST_TOKEN="<your-token>"
 
 ### 3. Basic Usage (CLI)
 
-#### Create a Profile
+#### Create a Profile (CRM Data or Agent Personas)
 ```bash
+# Setting up a CRM entity
 node acmi.mjs profile "sales" "client-123" '{"name": "ClientCo", "stage": "Proposal"}'
+
+# Setting up dynamic rules for a subordinate Agent (e.g., Claude Code)
+node acmi.mjs profile "operations" "claude_core" '{"role": "engineer", "delegation_rules": "No business logic."}'
 ```
 
 #### Log Events (Pipe webhooks directly here)
 ```bash
 node acmi.mjs event "sales" "client-123" "gmail" "Sent the PDF proposal."
-node acmi.mjs event "sales" "client-123" "vapi" "Discovery call completed."
+node acmi.mjs event "cowork" "hq" "openclaw" "Agent session started."
 ```
 
 #### Read the Full Agent Context
@@ -92,12 +96,12 @@ node acmi.mjs signal "sales" "client-123" '{"sentiment": "positive", "next_actio
 
 ## 💡 Use Cases
 
-Because ACMI is **namespace-driven**, it scales instantly across your entire SaaS portfolio.
+Because ACMI is **namespace-driven**, it scales instantly across your entire SaaS portfolio and internal orchestration.
 
 *   **Sales CRM:** `acmi get sales gardine-wilson`
 *   **Customer Support:** `acmi get support ticket-8922`
-*   **Logistics/Fleet:** `acmi get fleet truck-04`
-*   **Project Management:** `acmi get project core-pumping-website`
+*   **Agent Operations (Dynamic Personas):** `acmi get operations bentley_core`
+*   **Project Management / Cowork HQ:** `acmi get cowork hq`
 
 ---
 
