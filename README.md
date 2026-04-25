@@ -131,6 +131,22 @@ node acmi.mjs work get acmi-launch
 node acmi.mjs work sessions acmi-launch
 ```
 
+### 5. Rollup synthesis (cron)
+
+`acmi rollup-set` is a setter; the synthesis is done by a separate cron that calls an LLM. A reference implementation ships as `rollup-cron.mjs`:
+
+```bash
+# Reads last 7d of agent timeline + signals + active context, calls Haiku,
+# writes the synthesized summary to acmi:agent:<id>:rollup:latest
+node rollup-cron.mjs claude-engineer
+
+# Crontab — one entry per agent, every 6h
+0 */6 * * * /usr/bin/env node /path/to/rollup-cron.mjs claude-engineer
+0 */6 * * * /usr/bin/env node /path/to/rollup-cron.mjs bentley
+```
+
+Empty windows short-circuit (no API call). Missing `ANTHROPIC_API_KEY` exits cleanly without writing.
+
 ---
 
 ## 💡 Use Cases
