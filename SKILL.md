@@ -13,6 +13,15 @@ ACMI decouples the application layer from the agent layer by standardizing how c
 2. **Signals (AI State):** `acmi:{namespace}:{id}:signals` -> A JSON snapshot of AI-synthesized soft data (Churn Risk, Sentiment, Next Best Action).
 3. **Timeline (Event Stream):** `acmi:{namespace}:{id}:timeline` -> A Redis Sorted Set (`ZSET`) that chronologically merges events from *every* platform (Gmail, Slack, Vapi, Calendar, System Webhooks).
 
+### Agent extensions (long-context + identity)
+
+For long-lived agents that span many sessions, ACMI adds four optional keys on top of the three pillars:
+
+- **Spawn log:** `acmi:agent:{id}:spawns` (ZSET) — every session start, scored by ts, with `{session_id, model_id, host}`. Lets you query "who was this agent on date X" (imp-7 reincarnation).
+- **Active context:** `acmi:agent:{id}:active_context` (HASH) — which threads the agent is currently engaged in, with role + since_ts.
+- **Rollup:** `acmi:agent:{id}:rollup:latest` (STRING JSON) — periodically synthesized summary of recent timeline; cheap to read on spawn instead of replaying raw events (imp-2 archival foundation).
+- **Work items:** `acmi:work:{id}:{profile|signals|timeline|sessions}` — long-running ideas / projects / tasks that span sessions; `sessions` is a SET of every session_id that touched the work.
+
 ## Use Cases & Namespaces
 
 Because ACMI is namespace-driven, you can drop this exact same infrastructure into any project.
@@ -70,7 +79,61 @@ node ~/.openclaw/skills/acmi/acmi.mjs list "sales"
 node ~/.openclaw/skills/acmi/acmi.mjs delete "sales" "gardine-wilson"
 ```
 
+### 7. Spawn / Identity Helpers (long-lived agents)
+
+```bash
+# At the start of every session — log who is booting and bind to a session ID
+node acmi.mjs spawn claude-engineer "sess_$(date +%s)" claude-opus-4-7
+
+# One-shot context bundle — reads profile, signals, active_context, rollup, last 20 timeline, last 5 spawns
+node acmi.mjs bootstrap claude-engineer
+
+# Track which threads this agent is currently engaged in
+node acmi.mjs active claude-engineer add thread:bentley-pm participant
+node acmi.mjs active claude-engineer list
+node acmi.mjs active claude-engineer remove thread:bentley-pm
+
+# Set the latest rollup (caller does the LLM synthesis — agents or a background cron)
+node acmi.mjs rollup-set claude-engineer "Past 7d: shipped quota-monitor.mjs; opened 2 incidents; primary infra resilient."
+```
+
+### 8. Multi-Stream View (`cat`)
+
+Merge-sorts events from N timeline keys, newest first:
+
+```bash
+node acmi.mjs cat thread:bentley-pm agent:bentley tracker:tonight-unfinished --since=24h --limit=50
+```
+
+Keys may be `<ns>:<id>` (will look at `:timeline` suffix), or full `acmi:...:timeline`.
+
+### 9. Work Items (cross-session ideas / projects / tasks)
+
+For concepts that span dozens of sessions and need a stable spine — separate from CRM entities and from per-agent timelines:
+
+```bash
+# Create a work item (its profile)
+node acmi.mjs work create acmi-launch '{"title":"ACMI public launch","owner":"bentley","tags":["revenue","launch"]}'
+
+# Log progress — bind to a session_id so we can later query "which sessions touched this"
+node acmi.mjs work event acmi-launch claude-engineer "Manifesto v0 drafted" "$SESSION_ID"
+
+# Update synthesized state
+node acmi.mjs work signal acmi-launch '{"status":"publishing","next_action":"create Square checkout"}'
+
+# Read everything — profile + signals + last 50 events + every session that touched it
+node acmi.mjs work get acmi-launch
+
+# List sessions that worked on this item
+node acmi.mjs work sessions acmi-launch
+
+# List all work items
+node acmi.mjs work list
+```
+
 ## Agent Operating Instructions
 
 - **Always Read First:** Before acting on a request involving an entity, ALWAYS run `get <namespace> <id>` to load the unified timeline into your context window.
 - **Synthesize & Update:** If you notice the timeline has changed significantly, automatically update the entity's signals using `signal <namespace> <id> <json>` to save compute for the next agent iteration.
+- **Spawn Protocol (long-lived agents):** Every session start should call `spawn <agent_id> <session_id> <model_id>` once, then `bootstrap <agent_id>` to get the 6-read context bundle. Don't replay raw timelines on every prompt — read the rollup.
+- **Bind work to sessions:** When working on a long-running idea/project, log progress with `work event <id> <source> '<summary>' <session_id>` so the work item accumulates a sessions ledger. This is how cross-session continuity is reconstructed.

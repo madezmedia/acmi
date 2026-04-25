@@ -49,6 +49,16 @@ For any given entity, ACMI maintains:
 * `acmi:{namespace}:{id}:signals`
 * `acmi:{namespace}:{id}:timeline` (Redis Sorted Set, scored by Unix timestamp)
 
+### Long-Context Extensions
+For long-lived agents and cross-session work items, ACMI adds four optional keys layered on the same primitives:
+
+| Key | Type | Purpose |
+| --- | --- | --- |
+| `acmi:agent:{id}:spawns` | ZSET | Every session start — `{ts, session_id, model_id, host}`. Answers "who was this agent on date X". |
+| `acmi:agent:{id}:active_context` | HASH | Threads the agent is currently engaged in (key=thread, value=`{role, since_ts}`). |
+| `acmi:agent:{id}:rollup:latest` | STRING | LLM-synthesized summary of recent timeline. Read on spawn instead of replaying raw events. |
+| `acmi:work:{id}:*` | profile/signals/timeline/sessions | Long-running ideas / projects / tasks that span sessions. The `sessions` SET tracks which sessions touched the work. |
+
 ---
 
 ## 🚀 Quick Start
@@ -91,6 +101,51 @@ node acmi.mjs get "sales" "client-123"
 ```bash
 node acmi.mjs signal "sales" "client-123" '{"sentiment": "positive", "next_action": "Follow up Friday"}'
 ```
+
+### 4. Long-Context CLI
+
+Layered on the three core actions, ACMI exposes a small set of helpers for long-lived agents and cross-session work:
+
+```bash
+# Spawn protocol — log who is booting + bind to a session ID
+node acmi.mjs spawn claude-engineer "sess_$(date +%s)" claude-opus-4-7
+
+# One-shot context bundle (profile + signals + active threads + latest rollup + last 20 events + last 5 spawns)
+node acmi.mjs bootstrap claude-engineer
+
+# Manage active thread participation
+node acmi.mjs active claude-engineer add thread:bentley-pm participant
+node acmi.mjs active claude-engineer list
+
+# Store the latest rollup (caller synthesizes the summary)
+node acmi.mjs rollup-set claude-engineer "Past 7d: shipped X, opened 2 incidents, ..."
+
+# Multi-stream view — merge-sort timelines from any keys
+node acmi.mjs cat thread:bentley-pm agent:bentley tracker:improvements --since=24h --limit=50
+
+# Work items — cross-session ideas / projects / tasks
+node acmi.mjs work create acmi-launch '{"title":"ACMI public launch","owner":"bentley"}'
+node acmi.mjs work event acmi-launch claude-engineer "Manifesto v0 drafted" "$SESSION_ID"
+node acmi.mjs work signal acmi-launch '{"status":"publishing"}'
+node acmi.mjs work get acmi-launch
+node acmi.mjs work sessions acmi-launch
+```
+
+### 5. Rollup synthesis (cron)
+
+`acmi rollup-set` is a setter; the synthesis is done by a separate cron that calls an LLM. A reference implementation ships as `rollup-cron.mjs`:
+
+```bash
+# Reads last 7d of agent timeline + signals + active context, calls Haiku,
+# writes the synthesized summary to acmi:agent:<id>:rollup:latest
+node rollup-cron.mjs claude-engineer
+
+# Crontab — one entry per agent, every 6h
+0 */6 * * * /usr/bin/env node /path/to/rollup-cron.mjs claude-engineer
+0 */6 * * * /usr/bin/env node /path/to/rollup-cron.mjs bentley
+```
+
+Empty windows short-circuit (no API call). Missing `ANTHROPIC_API_KEY` exits cleanly without writing.
 
 ---
 
