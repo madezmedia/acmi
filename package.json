@@ -1,13 +1,18 @@
 {
   "name": "acmi",
-  "version": "1.0.0",
-  "description": "Agentic Context Management Infrastructure - A universal KV context engine for AI agents",
+  "version": "1.2.0",
+  "description": "Agentic Context Management Infrastructure v1.2 - A universal KV context engine for AI agent fleets",
   "main": "acmi.mjs",
   "bin": {
     "acmi": "./acmi.mjs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "acmi": "node acmi.mjs",
+    "invite": "node invite-agent.mjs",
+    "drift": "node drift-diff.mjs",
+    "standup": "node standup-brief.mjs",
+    "quota": "node quota-monitor.mjs",
+    "rollup": "node rollup-cron.mjs"
   },
   "keywords": [
     "ai",
@@ -15,8 +20,17 @@
     "context",
     "llm",
     "redis",
-    "upstash"
+    "upstash",
+    "acmi",
+    "multi-agent",
+    "coordination",
+    "reinforcement-learning",
+    "fleet"
   ],
-  "author": "Michael Shaw",
-  "license": "MIT"
+  "author": "Michael Shaw <madezmediapartners@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/madezmedia/acmi.git"
+  }
 }

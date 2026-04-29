@@ -131,6 +131,183 @@ node acmi.mjs work sessions acmi-launch
 node acmi.mjs work list
 ```
 
+## Communication Standard (v1.1)
+
+All major events posted to coordination timelines (`acmi:thread:agent-coordination:timeline` and agent-specific threads) **MUST** include these five mandatory fields:
+
+| Field | Required | Format | Notes |
+|-------|----------|--------|-------|
+| `ts` | ✅ | Unix ms epoch | Timestamp of the event |
+| `source` | ✅ | Agent ID string | e.g. `bentley`, `claude-engineer`, `gemini-cli` |
+| `kind` | ✅ | Event type enum | e.g. `handoff-request`, `coord-claim`, `roundtable-input` |
+| `correlationId` | ✅ | **camelCase ONLY** | No snake_case. No missing field. Thread tracking ID. |
+| `summary` | ✅ | ≤140 char string | Human-readable description of what happened |
+
+### Example Event
+
+```json
+{
+  "ts": 1745947200000,
+  "source": "claude-engineer",
+  "kind": "handoff-complete",
+  "correlationId": "readmeRewrite-1745947200000",
+  "summary": "[done] README.md rewritten to v1.2 spec",
+  "payload": {
+    "files_changed": ["README.md"],
+    "lines_added": 320
+  }
+}
+```
+
+### Standard Event Kinds
+
+`roundtable-open`, `roundtable-input`, `roundtable-synthesis`, `roundtable-plan`, `roundtable-nudge`, `handoff-request`, `handoff-ack`, `handoff-resolved`, `handoff-complete`, `hitl-required`, `hitl-resolved`, `tick-start`, `tick-end`, `comms-correction`, `comms-rule-ack`, `coord-claim`, `coord-release`, `coord-defer`, `schema-proposal`, `deployment-shipped`, `sync-snapshot`, `wake-status`.
+
+---
+
+## Lock-Protocol (v1.0)
+
+Prevents duplicate work between agents or parallel sessions executing the same batch task.
+
+### Rules
+
+1. **Claim:** Before starting any batch-mutation or heavy task, post a `kind: "coord-claim"` event to the coordination thread.
+2. **Verify:** Scan the last 10 minutes of the coordination thread for existing claims with the same `parent_task_cid`.
+3. **Hedge:** If a claim exists from another agent within the **5-minute window**, the second agent MUST defer or complement (not duplicate).
+4. **Release:** On completion, post a `kind: "coord-release"` event to unlock the task.
+
+### Example Flow
+
+```bash
+# Agent claims the task
+node acmi.mjs event thread agent-coordination claude-engineer \
+  --kind coord-claim \
+  --correlationId "lock-readme-rewrite-1745947200000" \
+  'Claiming README rewrite for batch execution'
+
+# ... agent does the work ...
+
+# Agent releases the lock
+node acmi.mjs event thread agent-coordination claude-engineer \
+  --kind coord-release \
+  --correlationId "lock-readme-rewrite-1745947200000" \
+  'README rewrite complete'
+```
+
+---
+
+## Anti-Dead Heartbeats
+
+Agents SHOULD update their `signal.last_heartbeat_ts` on every tick (every wake cycle or significant action).
+
+### Stall Detection
+
+- Projects with no heartbeat update for **>48 hours** are auto-marked as **STALLED**
+- STALLED projects are escalated to the HITL (human-in-the-loop) queue
+- The `anti-dead` monitoring job (run via `drift-diff.mjs` or standalone) scans all namespaces for stale entities
+
+### Implementation
+
+```bash
+# Agent updates heartbeat on every tick
+node acmi.mjs signal agent bentley '{"last_heartbeat_ts": 1745947200000, "status": "active"}'
+```
+
+---
+
+## Reinforcement Learning Cycle
+
+Every workflow step goes through a mandatory learning cycle:
+
+```
+Execute → Assess → Log → Analyze → Adjust → Execute (improved)
+```
+
+### Assessment Rules
+
+- **Every step gets scored** (0–100). No execution without an assessment entry.
+- **Automated review** for non-critical steps — run outputs against criteria via quick inference.
+- **Human review** for critical steps — brand, legal, client-facing content.
+- **Audit trail is permanent** — every score and lesson is a timeline event.
+
+### Pattern: logImprovement() and logAssessment()
+
+```bash
+# Log a quality assessment for a workflow step
+node acmi.mjs event workflow content-agency bentley \
+  --kind assessment \
+  --correlationId "assess-draft-1745947200000" \
+  '{"stepId": "draft", "score": 82, "criteria": "relevance, tone, accuracy"}'
+
+# Log a lesson learned
+node acmi.mjs event workflow content-agency bentley \
+  --kind improvement \
+  --correlationId "improve-draft-1745947200000" \
+  '{"stepId": "draft", "lesson": "Shorter paragraphs score higher for engagement"}'
+```
+
+### Performance Metrics
+
+Aggregate metrics tracked per workflow:
+- Average score per step (are we getting better?)
+- Average cost per step (are we spending efficiently?)
+- Failure/retry rate per step (are we breaking often?)
+- Suggestions: model tier changes, budget rebalancing, checkpoint placement
+
+---
+
+## Fleet Coordination
+
+### Task Assignment: coord-claim
+
+Use `coord-claim` (see Lock-Protocol above) to assign tasks to specific agents. The claim includes the target agent, scope, and estimated duration.
+
+### Roundtables
+
+Structured multi-agent deliberation for strategic decisions:
+
+1. **roundtable-open** — Orchestrator posts questions + participating agents + deadline
+2. **roundtable-input** — Each agent responds with structured answers
+3. **roundtable-synthesis** — Synthesizer aggregates inputs into decisions
+
+```bash
+# Open a roundtable
+node acmi.mjs event thread agent-coordination bentley \
+  --kind roundtable-open \
+  --correlationId "rt-launch-plan-1745947200000" \
+  'Opening roundtable: ACMI launch strategy'
+
+# Agent responds
+node acmi.mjs event thread agent-coordination claude-engineer \
+  --kind roundtable-input \
+  --correlationId "rt-launch-plan-1745947200000" \
+  'Input: Recommend phased rollout, start with CLI power users'
+```
+
+### Deliverables: handoff-complete
+
+When an agent finishes a task, post a `handoff-complete` event with the result:
+
+```bash
+node acmi.mjs event thread agent-coordination claude-engineer \
+  --kind handoff-complete \
+  --correlationId "handoff-readme-1745947200000" \
+  '[done] README.md v1.2 — 320 lines, all sections covered'
+```
+
+### Hourly Wake: wake-status
+
+Each agent posts a `wake-status` event during its hourly wake cycle:
+
+```bash
+node acmi.mjs event thread agent-coordination gemini-cli \
+  --kind wake-status \
+  --correlationId "wake-gemini-1745947200000" \
+  'Wake :15 — drift-diff clean, no schema violations detected'
+```
+
+---
+
 ## Agent Operating Instructions
 
 - **Always Read First:** Before acting on a request involving an entity, ALWAYS run `get <namespace> <id>` to load the unified timeline into your context window.
