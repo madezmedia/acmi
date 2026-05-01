@@ -1,0 +1,27 @@
+/**
+ * ACMI — The protocol for agent memory.
+ *
+ * Three keys per entity: Profile / Signals / Timeline.
+ *
+ * @packageDocumentation
+ */
+
+export { createAcmi } from "./client.js";
+export {
+  AcmiValidationError,
+  type AcmiAdapter,
+  type AcmiClient,
+  type EntityId,
+  type ProfileDoc,
+  type SignalValue,
+  type TimelineEvent,
+  type TimelineReadOpts,
+} from "./types.js";
+
+// Adapters are also accessible via subpath imports:
+//   import { InMemoryAdapter } from "@madezmedia/acmi/adapters/in-memory";
+//   import { RedisAdapter } from "@madezmedia/acmi/adapters/redis";
+//   import { UpstashAdapter } from "@madezmedia/acmi/adapters/upstash";
+//
+// The conformance suite is at:
+//   import { runConformanceTests } from "@madezmedia/acmi/testing/conformance";

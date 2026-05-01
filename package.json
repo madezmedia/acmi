@@ -1,36 +1,108 @@
 {
-  "name": "acmi",
+  "name": "@madezmedia/acmi",
   "version": "1.2.0",
-  "description": "Agentic Context Management Infrastructure v1.2 - A universal KV context engine for AI agent fleets",
-  "main": "acmi.mjs",
-  "bin": {
-    "acmi": "./acmi.mjs"
-  },
-  "scripts": {
-    "acmi": "node acmi.mjs",
-    "invite": "node invite-agent.mjs",
-    "drift": "node drift-diff.mjs",
-    "standup": "node standup-brief.mjs",
-    "quota": "node quota-monitor.mjs",
-    "rollup": "node rollup-cron.mjs"
-  },
+  "description": "ACMI — the protocol for agent memory. Three keys: Profile / Signals / Timeline.",
   "keywords": [
     "ai",
     "agents",
     "context",
-    "llm",
+    "agent-memory",
+    "multi-agent",
+    "protocol",
     "redis",
     "upstash",
-    "acmi",
-    "multi-agent",
-    "coordination",
-    "reinforcement-learning",
-    "fleet"
+    "ai-agents",
+    "mcp",
+    "context-management",
+    "fleet",
+    "reinforcement-learning"
   ],
-  "author": "Michael Shaw <madezmediapartners@gmail.com>",
+  "homepage": "https://github.com/madezmedia/acmi",
+  "bugs": "https://github.com/madezmedia/acmi/issues",
   "license": "MIT",
+  "author": "Michael Shaw <madezmediapartners@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/madezmedia/acmi.git"
+    "url": "git+https://github.com/madezmedia/acmi.git"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./adapters/in-memory": {
+      "types": "./dist/adapters/in-memory.d.ts",
+      "import": "./dist/adapters/in-memory.js",
+      "require": "./dist/adapters/in-memory.cjs"
+    },
+    "./adapters/redis": {
+      "types": "./dist/adapters/redis.d.ts",
+      "import": "./dist/adapters/redis.js",
+      "require": "./dist/adapters/redis.cjs"
+    },
+    "./adapters/upstash": {
+      "types": "./dist/adapters/upstash.d.ts",
+      "import": "./dist/adapters/upstash.js",
+      "require": "./dist/adapters/upstash.cjs"
+    },
+    "./testing/conformance": {
+      "types": "./dist/testing/conformance.d.ts",
+      "import": "./dist/testing/conformance.js",
+      "require": "./dist/testing/conformance.cjs"
+    }
+  },
+  "bin": {
+    "acmi": "./cli/acmi.mjs"
+  },
+  "files": [
+    "dist",
+    "cli",
+    "docs",
+    "README.md",
+    "SPEC.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm test",
+    "acmi": "node cli/acmi.mjs",
+    "invite": "node cli/invite-agent.mjs",
+    "drift": "node cli/drift-diff.mjs",
+    "standup": "node cli/standup-brief.mjs",
+    "quota": "node cli/quota-monitor.mjs",
+    "rollup": "node cli/rollup-cron.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "ioredis": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ioredis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^2.0.0",
+    "ioredis": "^5.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
