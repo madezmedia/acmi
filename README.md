@@ -398,6 +398,18 @@ Run `01` to feel the API; run `02`–`06` against the same Upstash URL to feel f
 
 If you use [OpenClaw](https://github.com/nicepkg/openclaw), copy the `cli/` directory to `~/.openclaw/skills/acmi/` and the agent will natively understand how to use ACMI to track its own context across sessions.
 
+## Roadmap
+
+**Shipped:** v1.2 — three-key data model, three reference adapters (in-memory / Redis / Upstash), 31-test conformance suite, five reference agent integrations.
+
+**In progress:** v1.3 — multi-actor (`actor_type` field) + multi-tenant (`tenant_id` field). Additive; v1.2 deployments unaffected.
+
+**Next:** v1.4 federation, v1.5 streaming + change notification, expanding adapter ecosystem (DynamoDB, Cloudflare KV, FoundationDB).
+
+**v2.0 — ACMI-Sigil:** Optional cryptographic identity and trust layer for ACMI. Enables multi-vendor agent collaboration, regulated/enterprise audit trails, and personal sovereignty over agent identity. PGP-inspired but built for modern agent comms — Ed25519 signatures, X25519 sealed signals, group-encrypted timelines, web-of-trust between agents. Spec drafting begins after ACMI core hits 5K stars. Cryptographically audited before v1.0.
+
+Full roadmap: [`ROADMAP.md`](./ROADMAP.md).
+
 ## Contributing
 
 Pull requests welcome. The fastest contribution: write an adapter. See [`CONTRIBUTING.md`](./CONTRIBUTING.md).
