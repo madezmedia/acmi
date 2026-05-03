@@ -1,9 +1,16 @@
+<p align="center">
+  <img src="./assets/banner.png" alt="ACMI — three keys per entity. That's the whole protocol." width="640">
+</p>
+
 # ACMI — Agentic Context Management Infrastructure
 
 [![npm](https://img.shields.io/npm/v/@madezmedia/acmi.svg)](https://www.npmjs.com/package/@madezmedia/acmi)
-[![Protocol v1.2](https://img.shields.io/badge/Protocol-v1.2-blue)](./SPEC.md)
+[![Protocol v1.2](https://img.shields.io/badge/Protocol-v1.2-2d4a3e)](./SPEC.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Conformance: 31/31](https://img.shields.io/badge/Conformance-31%2F31-2d4a3e)](./tests)
+
+> **Product page:** [v3-ten-beta.vercel.app/acmi](https://v3-ten-beta.vercel.app/acmi/) · the canonical narrative, install card, and visual demo of the three-key model.
 
 **ACMI is a universal, namespace-driven framework that gives AI agents persistent, real-time context — replacing fragmented SQL joins and multi-table queries with a single, LLM-optimized Key-Value engine backed by serverless Redis.** Every entity stores exactly three things an LLM needs to make decisions: a **Profile** (who/what is this entity), **Signals** (what does the AI think about it), and a **Timeline** (everything that happened, chronologically, from every source). The result: agents wake up, read one JSON payload, and immediately understand the full context of any deal, ticket, project, or task — no joins, no bloat, no tokens wasted on schema artifacts.
 

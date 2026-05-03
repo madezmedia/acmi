@@ -1,0 +1,6 @@
+<svg width="1200" height="400" viewBox="0 0 1200 400" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="400" fill="#faf9f5" />
+  <text x="400" y="200" font-family="Source Serif 4, Source Serif Pro, Georgia, serif" font-style="italic" font-weight="900" font-size="96" fill="#2d4a3e">ACMI</text>
+  <line x1="400" y1="220" x2="680" y2="220" stroke="#2d4a3e" stroke-width="8" />
+  <line x1="400" y1="236" x2="680" y2="236" stroke="#2d4a3e" stroke-width="8" />
+</svg>

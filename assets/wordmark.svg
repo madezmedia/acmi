@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 90" width="220" height="90" role="img" aria-label="ACMI">
+  <text x="6" y="62" font-family="Source Serif 4, Source Serif Pro, Georgia, serif" font-style="italic" font-weight="700" font-size="60" fill="#2d4a3e" letter-spacing="-1">ACMI</text>
+  <line x1="10" y1="74" x2="148" y2="74" stroke="#2d4a3e" stroke-width="2.5" />
+  <line x1="10" y1="80" x2="148" y2="80" stroke="#2d4a3e" stroke-width="2.5" />
+</svg>

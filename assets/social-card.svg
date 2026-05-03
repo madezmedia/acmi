@@ -1,0 +1,10 @@
+<svg width="1280" height="640" viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1280" height="640" fill="#faf9f5" />
+  <text x="80" y="280" font-family="Source Serif 4, Source Serif Pro, Georgia, serif" font-style="italic" font-weight="900" font-size="72" fill="#2d4a3e">ACMI</text>
+  <line x1="80" y1="300" x2="260" y2="300" stroke="#2d4a3e" stroke-width="6" />
+  <line x1="80" y1="312" x2="260" y2="312" stroke="#2d4a3e" stroke-width="6" />
+  
+  <text x="80" y="380" font-family="Source Serif 4, Source Serif Pro, Georgia, serif" font-style="italic" font-weight="900" font-size="32" fill="#2d4a3e">Three keys per entity. That’s the whole protocol.</text>
+  
+  <text x="80" y="550" font-family="monospace" font-size="24" fill="#666">npm install @madezmedia/acmi</text>
+</svg>
