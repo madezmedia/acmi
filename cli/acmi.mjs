@@ -56,29 +56,27 @@ function parseSince(s) {
   return n * (m[2] === 'h' ? 3600e3 : m[2] === 'd' ? 86400e3 : 60e3);
 }
 
-const action = process.argv[2];
-
 async function main() {
-  if (!action) {
-    printHelp();
-    return;
-  }
+  const [action, ...rest] = process.argv.slice(2);
 
   try {
     switch (action) {
-      case 'profile':       await cmdProfile(); break;
-      case 'event':         await cmdEvent(); break;
-      case 'signal':        await cmdSignal(); break;
-      case 'get':           await cmdGet(); break;
-      case 'list':          await cmdList(); break;
-      case 'delete':        await cmdDelete(); break;
-      case 'bootstrap':     await cmdBootstrap(process.argv[3]); break;
-      case 'cat':           await cmdCat(process.argv.slice(3)); break;
-      case 'spawn':         await cmdSpawn(process.argv[3], process.argv[4], process.argv[5]); break;
-      case 'active':        await cmdActive(process.argv.slice(3)); break;
-      case 'rollup-set':    await cmdRollupSet(process.argv[3], process.argv[4]); break;
-      case 'work':          await cmdWork(process.argv.slice(3)); break;
-      default:              printHelp();
+      case 'profile':       await cmdProfile(rest); break;
+      case 'event':         await cmdEvent(rest); break;
+      case 'signal':        await cmdSignal(rest); break;
+      case 'get':           await cmdGet(rest); break;
+      case 'list':          await cmdList(rest); break;
+      case 'delete':        await cmdDelete(rest); break;
+      case 'bootstrap':     await cmdBootstrap(rest[0]); break;
+      case 'spawn':         await cmdSpawn(rest[0], rest[1], rest[2]); break;
+      case 'active':        await cmdActive(rest[0], rest[1], rest[2], rest[3]); break;
+      case 'rollup-set':    await cmdRollupSet(rest[0], rest[1]); break;
+      case 'cat':           await cmdCat(rest); break;
+      case 'work':          await cmdWork(rest[0], rest.slice(1)); break;
+      case '--help':
+      case 'help':
+      default:
+        printHelp();
     }
   } catch (err) {
     console.error("❌ Error:", err.message);
@@ -86,66 +84,58 @@ async function main() {
   }
 }
 
-async function cmdProfile() {
-  const namespace = process.argv[3];
-  const id = process.argv[4];
-  const json = process.argv[5];
-  if (!namespace || !id || !json) throw new Error("Usage: acmi profile <namespace> <id> '<json>'");
-  const prefix = `acmi:${namespace}:${id}`;
-  await redis('SET', `${prefix}:profile`, json);
-  await redis('SADD', `acmi:${namespace}:list`, id);
-  console.log(`✅ Profile updated for [${namespace}] ${id}`);
+async function cmdProfile(args) {
+  const [ns, id, json] = args;
+  if (!ns || !id || !json) throw new Error("Usage: acmi profile <ns> <id> '<json>'");
+  const key = `acmi:${ns}:${id}:profile`;
+  await redis('SET', key, json);
+  await redis('SADD', `acmi:${ns}:list`, id);
+  console.log(`✅ Profile updated: ${key}`);
 }
 
-async function cmdEvent() {
-  const namespace = process.argv[3];
-  const id = process.argv[4];
-  const source = process.argv[5];
-  const summary = process.argv[6];
-  if (!namespace || !id || !source || !summary) throw new Error("Usage: acmi event <namespace> <id> <source> '<summary>'");
+async function cmdEvent(args) {
+  const [ns, id, source, summary] = args;
+  if (!ns || !id || !source || !summary) throw new Error("Usage: acmi event <ns> <id> <source> '<summary>'");
+  const key = `acmi:${ns}:${id}:timeline`;
   const ts = Date.now();
-  const eventData = JSON.stringify({ ts, source, summary });
-  await redis('ZADD', `acmi:${namespace}:${id}:timeline`, ts, eventData);
-  console.log(`✅ Event logged for [${namespace}] ${id} from source: ${source}`);
+  const event = JSON.stringify({ ts, source, summary });
+  await redis('ZADD', key, ts, event);
+  await redis('SADD', `acmi:${ns}:list`, id);
+  console.log(`✅ Event logged: ${key} <- ${source}`);
 }
 
-async function cmdSignal() {
-  const namespace = process.argv[3];
-  const id = process.argv[4];
-  const json = process.argv[5];
-  if (!namespace || !id || !json) throw new Error("Usage: acmi signal <namespace> <id> '<json>'");
-  await redis('SET', `acmi:${namespace}:${id}:signals`, json);
-  console.log(`✅ Signals updated for [${namespace}] ${id}`);
+async function cmdSignal(args) {
+  const [ns, id, json] = args;
+  if (!ns || !id || !json) throw new Error("Usage: acmi signal <ns> <id> '<json>'");
+  const key = `acmi:${ns}:${id}:signals`;
+  await redis('SET', key, json);
+  await redis('SADD', `acmi:${ns}:list`, id);
+  console.log(`✅ Signals updated: ${key}`);
 }
 
-async function cmdGet() {
-  const namespace = process.argv[3];
-  const id = process.argv[4];
-  if (!namespace || !id) throw new Error("Usage: acmi get <namespace> <id>");
-  const prefix = `acmi:${namespace}:${id}`;
+async function cmdGet(args) {
+  const [ns, id] = args;
+  if (!ns || !id) throw new Error("Usage: acmi get <ns> <id>");
+  const prefix = `acmi:${ns}:${id}`;
   const profile = await redis('GET', `${prefix}:profile`);
   const signals = await redis('GET', `${prefix}:signals`);
-  const timeline = await redis('ZREVRANGE', `${prefix}:timeline`, 0, 49);
+  const timeline = await redis('ZREVRANGE', `${prefix}:timeline`, 0, 9);
   console.log(JSON.stringify({
-    namespace,
-    id,
-    profile: profile ? JSON.parse(profile) : null,
-    signals: signals ? JSON.parse(signals) : null,
-    timeline: (timeline || []).map(tryParse),
+    profile: profile ? tryParse(profile) : null,
+    signals: signals ? tryParse(signals) : null,
+    timeline_recent: (timeline || []).map(tryParse)
   }, null, 2));
 }
 
-async function cmdList() {
-  const namespace = process.argv[3];
-  if (!namespace) throw new Error("Usage: acmi list <namespace>");
-  const entities = await redis('SMEMBERS', `acmi:${namespace}:list`);
-  console.log(JSON.stringify(entities || [], null, 2));
+async function cmdList(ns) {
+  if (!ns) throw new Error("Usage: acmi list <ns>");
+  const arr = await redis('SMEMBERS', `acmi:${ns}:list`);
+  console.log(JSON.stringify(arr || [], null, 2));
 }
 
-async function cmdDelete() {
-  const namespace = process.argv[3];
-  const id = process.argv[4];
-  if (!namespace || !id) throw new Error("Usage: acmi delete <namespace> <id>");
+async function cmdDelete(args) {
+  const [namespace, id] = args;
+  if (!namespace || !id) throw new Error("Usage: acmi delete <ns> <id>");
   const prefix = `acmi:${namespace}:${id}`;
   await redis('DEL', `${prefix}:profile`, `${prefix}:signals`, `${prefix}:timeline`);
   await redis('SREM', `acmi:${namespace}:list`, id);
@@ -197,7 +187,13 @@ async function cmdCat(args) {
   merged.sort((a, b) => b.ts - a.ts);
 
   for (const m of merged.slice(0, limit)) {
-    const iso = new Date(m.ts).toISOString().slice(0, 16).replace('T', ' ') + 'Z';
+    // Handle high-precision timestamps (e.g. 17-digit) by truncating to 13-digit ms
+    let ts = m.ts;
+    if (isNaN(ts)) continue;
+    if (ts > 9999999999999) {
+      ts = Number(String(ts).slice(0, 13));
+    }
+    const iso = new Date(ts).toISOString().slice(0, 16).replace('T', ' ') + 'Z';
     const src = m._source.replace(/^acmi:|:timeline$/g, '');
     const d = m.data || {};
     const kind = d.kind || d.source || '?';
@@ -209,49 +205,35 @@ async function cmdCat(args) {
 async function cmdSpawn(agentId, sessionId, modelId) {
   if (!agentId) throw new Error("Usage: acmi spawn <agent_id> [session_id] [model_id]");
   const ts = Date.now();
-  const event = JSON.stringify({
-    ts,
-    session_id: sessionId || null,
-    model_id: modelId || null,
-    host: process.env.HOSTNAME || null,
-  });
-  await redis('ZADD', `acmi:agent:${agentId}:spawns`, ts, event);
-  console.log(`✅ Spawn logged for [${agentId}] (session=${sessionId || '-'}, model=${modelId || '-'})`);
+  const data = JSON.stringify({ ts, session_id: sessionId || 'unknown', model_id: modelId || 'unknown' });
+  await redis('ZADD', `acmi:agent:${agentId}:spawns`, ts, data);
+  console.log(`✅ Spawn logged for ${agentId}`);
 }
 
-async function cmdActive(args) {
-  const [agentId, sub, threadKey, role] = args;
-  if (!agentId || !sub) throw new Error("Usage: acmi active <agent_id> <add|remove|list> [thread_key] [role]");
+async function cmdActive(agentId, action, threadKey, role) {
+  if (!agentId || !action) throw new Error("Usage: acmi active <agent_id> add|remove|list [thread_key] [role]");
   const key = `acmi:agent:${agentId}:active_context`;
-
-  if (sub === 'add') {
-    if (!threadKey) throw new Error("Usage: acmi active <agent_id> add <thread_key> [role]");
-    const value = JSON.stringify({ role: role || 'participant', since_ts: Date.now() });
-    await redis('HSET', key, threadKey, value);
-    console.log(`✅ ${agentId} active in ${threadKey} as ${role || 'participant'}`);
-  } else if (sub === 'remove') {
-    if (!threadKey) throw new Error("Usage: acmi active <agent_id> remove <thread_key>");
+  if (action === 'add') {
+    if (!threadKey) throw new Error("thread_key required for add");
+    await redis('HSET', key, threadKey, JSON.stringify({ role: role || 'participant', joined_at: Date.now() }));
+    console.log(`✅ Joined thread ${threadKey}`);
+  } else if (action === 'remove') {
+    if (!threadKey) throw new Error("thread_key required for remove");
     await redis('HDEL', key, threadKey);
-    console.log(`✅ ${agentId} left ${threadKey}`);
-  } else if (sub === 'list') {
-    const arr = await redis('HGETALL', key);
-    console.log(JSON.stringify(parseHash(arr), null, 2));
+    console.log(`✅ Left thread ${threadKey}`);
   } else {
-    throw new Error(`Unknown active subaction: ${sub}`);
+    const res = await redis('HGETALL', key);
+    console.log(JSON.stringify(parseHash(res), null, 2));
   }
 }
 
 async function cmdRollupSet(agentId, text) {
-  if (!agentId || !text) throw new Error("Usage: acmi rollup-set <agent_id> '<summary text>'");
-  const payload = JSON.stringify({ ts: Date.now(), summary: text });
-  await redis('SET', `acmi:agent:${agentId}:rollup:latest`, payload);
-  console.log(`✅ Rollup set for [${agentId}]`);
+  if (!agentId || !text) throw new Error("Usage: acmi rollup-set <agent_id> '<text>'");
+  await redis('SET', `acmi:agent:${agentId}:rollup:latest`, JSON.stringify({ ts: Date.now(), summary: text }));
+  console.log(`✅ Rollup updated for ${agentId}`);
 }
 
-async function cmdWork(args) {
-  const [sub, ...rest] = args;
-  if (!sub) throw new Error("Usage: acmi work <create|get|event|signal|sessions|list> ...");
-
+async function cmdWork(sub, rest) {
   switch (sub) {
     case 'create': {
       const [id, json] = rest;

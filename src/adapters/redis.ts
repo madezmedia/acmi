@@ -15,7 +15,7 @@ export interface IoredisLike {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<unknown>;
   del(key: string | string[]): Promise<unknown>;
-  zadd(key: string, score: number | string, member: string): Promise<unknown>;
+  zadd(key: string, ...args: Array<string | number>): Promise<number | string>;
   zrangebyscore(
     key: string,
     min: number | string,
@@ -141,6 +141,7 @@ export class RedisAdapter implements AcmiAdapter {
   async timelineAppend(entityId: EntityId, event: TimelineEvent): Promise<void> {
     await this.client.zadd(
       this.k(entityId, "timeline"),
+      "NX",
       event.ts,
       JSON.stringify(event)
     );
@@ -161,6 +162,64 @@ export class RedisAdapter implements AcmiAdapter {
 
   async timelineSize(entityId: EntityId): Promise<number> {
     return this.client.zcard(this.k(entityId, "timeline"));
+  }
+
+  async batch(ops: any[]): Promise<void> {
+    // If client has a multi method (like ioredis), use it for atomic batching
+    const client = this.client as any;
+    if (typeof client.multi === "function") {
+      const multi = client.multi();
+      for (const op of ops) {
+        switch (op.type) {
+          case "profileSet":
+            multi.set(this.k(op.entityId, "profile"), JSON.stringify(op.doc));
+            break;
+          case "profileDelete":
+            multi.del(this.k(op.entityId, "profile"));
+            break;
+          case "signalsSet": {
+            // Signals are read-modify-write in this adapter, so we can't 
+            // easily include them in a multi-exec without LUA.
+            // Executing them sequentially for now.
+            await this.signalsSet(op.entityId, op.key, op.value);
+            break;
+          }
+          case "signalsDelete":
+            await this.signalsDelete(op.entityId, op.key);
+            break;
+          case "timelineAppend":
+            multi.zadd(
+              this.k(op.entityId, "timeline"),
+              "NX",
+              op.event.ts,
+              JSON.stringify(op.event)
+            );
+            break;
+        }
+      }
+      await multi.exec();
+    } else {
+      // Fallback
+      for (const op of ops) {
+        switch (op.type) {
+          case "profileSet":
+            await this.profileSet(op.entityId, op.doc);
+            break;
+          case "profileDelete":
+            await this.profileDelete(op.entityId);
+            break;
+          case "signalsSet":
+            await this.signalsSet(op.entityId, op.key, op.value);
+            break;
+          case "signalsDelete":
+            await this.signalsDelete(op.entityId, op.key);
+            break;
+          case "timelineAppend":
+            await this.timelineAppend(op.entityId, op.event);
+            break;
+        }
+      }
+    }
   }
 
   async close(): Promise<void> {

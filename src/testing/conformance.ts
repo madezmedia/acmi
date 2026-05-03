@@ -87,9 +87,23 @@ function assert(cond: unknown, msg: string): asserts cond {
 }
 
 function assertEqual<T>(actual: T, expected: T, msg: string): void {
-  const a = JSON.stringify(actual);
-  const e = JSON.stringify(expected);
-  if (a !== e) throw new Error(`${msg}\n  expected: ${e}\n  actual:   ${a}`);
+  const isObject = (x: unknown) => x && typeof x === "object";
+  const sortKeys = (obj: any): any => {
+    if (!isObject(obj)) return obj;
+    if (Array.isArray(obj)) return obj.map(sortKeys);
+    return Object.keys(obj)
+      .sort()
+      .reduce((acc: any, key) => {
+        acc[key] = sortKeys(obj[key]);
+        return acc;
+      }, {});
+  };
+
+  const a = JSON.stringify(sortKeys(actual));
+  const e = JSON.stringify(sortKeys(expected));
+  if (a !== e) {
+    throw new Error(`${msg}\n  expected: ${JSON.stringify(expected)}\n  actual:   ${JSON.stringify(actual)}`);
+  }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────
@@ -107,27 +121,52 @@ const TESTS: Record<string, TestFn> = {
   "profile.set then profile.get round-trips": async (acmi) => {
     await acmi.profile.set("user:alice", { name: "Alice", tz: "UTC" });
     const got = await acmi.profile.get("user:alice");
-    assertEqual(got, { name: "Alice", tz: "UTC" }, "profile round-trip");
+    assertEqual(got, {
+      name: "Alice",
+      tz: "UTC",
+      actor_type: "human",
+      tenant_id: "madez",
+    }, "profile round-trip");
   },
 
   "profile.set overwrites existing": async (acmi) => {
     await acmi.profile.set("user:bob", { name: "Bob", role: "admin" });
     await acmi.profile.set("user:bob", { name: "Bob" });
     const got = await acmi.profile.get("user:bob");
-    assertEqual(got, { name: "Bob" }, "set should overwrite");
+    assertEqual(got, {
+      name: "Bob",
+      actor_type: "human",
+      tenant_id: "madez",
+    }, "set should overwrite");
   },
 
   "profile.merge combines new + existing keys": async (acmi) => {
     await acmi.profile.set("user:carol", { name: "Carol", tz: "UTC" });
     const merged = await acmi.profile.merge("user:carol", { tz: "PT", role: "user" });
-    assertEqual(merged, { name: "Carol", tz: "PT", role: "user" }, "merge result");
+    assertEqual(merged, {
+      name: "Carol",
+      tz: "PT",
+      role: "user",
+      actor_type: "human",
+      tenant_id: "madez",
+    }, "merge result");
     const got = await acmi.profile.get("user:carol");
-    assertEqual(got, { name: "Carol", tz: "PT", role: "user" }, "merge persisted");
+    assertEqual(got, {
+      name: "Carol",
+      tz: "PT",
+      role: "user",
+      actor_type: "human",
+      tenant_id: "madez",
+    }, "merge persisted");
   },
 
   "profile.merge on missing entity creates it": async (acmi) => {
     const merged = await acmi.profile.merge("user:dave", { name: "Dave" });
-    assertEqual(merged, { name: "Dave" }, "merge from null");
+    assertEqual(merged, {
+      name: "Dave",
+      actor_type: "human",
+      tenant_id: "madez",
+    }, "merge from null");
   },
 
   "profile.delete removes the entity": async (acmi) => {
@@ -142,7 +181,11 @@ const TESTS: Record<string, TestFn> = {
     const got1 = (await acmi.profile.get("user:frank")) as { name: string };
     got1.name = "MUTATED";
     const got2 = await acmi.profile.get("user:frank");
-    assertEqual(got2, { name: "Frank" }, "stored profile must be isolated from caller mutation");
+    assertEqual(got2, {
+      name: "Frank",
+      actor_type: "human",
+      tenant_id: "madez",
+    }, "stored profile must be isolated from caller mutation");
   },
 
   // ─── Signals ──────────────────────────────────────────────────────────
@@ -293,6 +336,104 @@ const TESTS: Record<string, TestFn> = {
     assertEqual(read[0]?.parentCorrelationId, "parent", "parent CID preserved");
   },
 
+  "timeline.append is idempotent for exact duplicates": async (acmi) => {
+    const ev = makeEvent({ ts: 12345, summary: "duplicate" });
+    await acmi.timeline.append("user:t-dup", ev);
+    await acmi.timeline.append("user:t-dup", ev);
+
+    assertEqual(await acmi.timeline.size("user:t-dup"), 1, "should deduplicate exact matches");
+  },
+
+  "batching executes all operations": async (acmi) => {
+    const entity = "user:batch-test";
+    await acmi.batch((b) => {
+      b.profile.set(entity, { batch: true });
+      b.signals.set(entity, "batch-key", 123);
+      b.timeline.append(entity, makeEvent({ summary: "batched" }));
+    });
+
+    assertEqual(await acmi.profile.get(entity), {
+      batch: true,
+      actor_type: "human",
+      tenant_id: "madez",
+    }, "profile");
+    assertEqual(await acmi.signals.get(entity, "batch-key"), 123, "signal");
+    const timeline = await acmi.timeline.read(entity);
+    assertEqual(timeline.length, 1, "timeline count");
+    assertEqual(timeline[0]?.summary, "batched", "timeline content");
+  },
+
+  "v1.3: auto-fills actor_type and tenant_id in profile": async (acmi) => {
+    const userEntity = "user:mikey-v13";
+    const agentEntity = "agent:claude-v13";
+
+    await acmi.profile.set(userEntity, { name: "Mikey" });
+    await acmi.profile.set(agentEntity, { name: "Claude" });
+
+    const userProfile = await acmi.profile.get(userEntity);
+    const agentProfile = await acmi.profile.get(agentEntity);
+
+    assertEqual(userProfile?.actor_type, "human", "user -> human");
+    assertEqual(agentProfile?.actor_type, "agent", "agent -> agent");
+    assertEqual(userProfile?.tenant_id, "madez", "default tenant");
+  },
+
+  "v1.3: auto-fills speaker_type and tenant_id in timeline": async (acmi) => {
+    const entity = "thread:sync-v13";
+    
+    // 1. Human source
+    await acmi.timeline.append(entity, {
+      source: "user:mikey",
+      kind: "chat",
+      correlationId: "c1",
+      summary: "hello"
+    });
+
+    // 2. Agent source
+    await acmi.timeline.append(entity, {
+      source: "agent:claude",
+      kind: "reply",
+      correlationId: "c1",
+      summary: "hi"
+    });
+
+    // 3. Explicit override
+    await acmi.timeline.append(entity, {
+      source: "system:cron",
+      kind: "tick",
+      correlationId: "c2",
+      summary: "pulse",
+      speaker_type: "system",
+      tenant_id: "external-org"
+    });
+
+    const events = await acmi.timeline.read(entity);
+    assertEqual(events[0]?.speaker_type, "human", "mikey -> human");
+    assertEqual(events[1]?.speaker_type, "agent", "claude -> agent");
+    assertEqual(events[2]?.speaker_type, "system", "explicit system");
+    assertEqual(events[2]?.tenant_id, "external-org", "explicit tenant");
+  },
+
+  "v1.3: batch also auto-fills": async (acmi) => {
+    const entity = "agent:batch-v13";
+    await acmi.batch((b) => {
+      b.profile.set(entity, { batch: true });
+      b.timeline.append(entity, {
+        source: entity,
+        kind: "batch",
+        correlationId: "bc1",
+        summary: "test"
+      });
+    });
+
+    const profile = await acmi.profile.get(entity);
+    const events = await acmi.timeline.read(entity);
+    
+    assertEqual(profile?.actor_type, "agent", "batch profile auto-fill");
+    assertEqual(events[0]?.speaker_type, "agent", "batch timeline auto-fill");
+    assertEqual(events[0]?.tenant_id, "madez", "batch tenant auto-fill");
+  },
+
   // ─── Validation (Comms v1.1) ──────────────────────────────────────────
 
   "rejects timeline events missing source": async (acmi) => {
@@ -361,8 +502,16 @@ const TESTS: Record<string, TestFn> = {
     await acmi.timeline.append("user:iso-a", makeEvent({ summary: "a-event" }));
     await acmi.timeline.append("user:iso-b", makeEvent({ summary: "b-event" }));
 
-    assertEqual(await acmi.profile.get("user:iso-a"), { who: "a" }, "profile a");
-    assertEqual(await acmi.profile.get("user:iso-b"), { who: "b" }, "profile b");
+    assertEqual(await acmi.profile.get("user:iso-a"), {
+      who: "a",
+      actor_type: "human",
+      tenant_id: "madez",
+    }, "profile a");
+    assertEqual(await acmi.profile.get("user:iso-b"), {
+      who: "b",
+      actor_type: "human",
+      tenant_id: "madez",
+    }, "profile b");
     assertEqual(await acmi.signals.get("user:iso-a", "k"), "va", "signal a");
     assertEqual(await acmi.signals.get("user:iso-b", "k"), "vb", "signal b");
     const aEvents = await acmi.timeline.read("user:iso-a");

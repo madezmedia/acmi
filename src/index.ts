@@ -6,6 +6,11 @@
  * @packageDocumentation
  */
 
+/**
+ * Current version of the @madezmedia/acmi SDK.
+ */
+export const VERSION = "1.2.0";
+
 export { createAcmi } from "./client.js";
 export {
   AcmiValidationError,

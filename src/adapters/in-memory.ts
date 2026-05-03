@@ -81,9 +81,16 @@ export class InMemoryAdapter implements AcmiAdapter {
       list = [];
       this.timelines.set(entityId, list);
     }
+
+    const cloned = structuredClone(event);
+    const json = JSON.stringify(cloned);
+
+    // Check for exact duplicate
+    const exists = list.some((e) => JSON.stringify(e) === json);
+    if (exists) return;
+
     // Insert keeping the list sorted by ts ascending. Stable: ties preserve
     // append order.
-    const cloned = structuredClone(event);
     let i = list.length;
     while (i > 0 && (list[i - 1] as TimelineEvent).ts > cloned.ts) i--;
     list.splice(i, 0, cloned);
@@ -107,6 +114,28 @@ export class InMemoryAdapter implements AcmiAdapter {
 
   async timelineSize(entityId: EntityId): Promise<number> {
     return this.timelines.get(entityId)?.length ?? 0;
+  }
+
+  async batch(ops: any[]): Promise<void> {
+    for (const op of ops) {
+      switch (op.type) {
+        case "profileSet":
+          await this.profileSet(op.entityId, op.doc);
+          break;
+        case "profileDelete":
+          await this.profileDelete(op.entityId);
+          break;
+        case "signalsSet":
+          await this.signalsSet(op.entityId, op.key, op.value);
+          break;
+        case "signalsDelete":
+          await this.signalsDelete(op.entityId, op.key);
+          break;
+        case "timelineAppend":
+          await this.timelineAppend(op.entityId, op.event);
+          break;
+      }
+    }
   }
 }
 

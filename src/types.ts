@@ -15,9 +15,36 @@
 
 export type EntityId = string;
 
-export type ProfileDoc = Record<string, unknown>;
+/**
+ * Valid actor types for v1.3 multi-actor schema.
+ * @see §11 of ACMI-PROTOCOL-v1.3
+ */
+export type ActorType = "agent" | "human" | "system" | "external";
 
-export type SignalValue = string | number | boolean | null | SignalValue[] | { [k: string]: SignalValue };
+/**
+ * Valid speaker types for v1.3 Comms patterns.
+ */
+export type SpeakerType = "agent" | "human" | "system";
+
+/**
+ * Profile document. Stable identity and configuration.
+ */
+export interface ProfileDoc extends Record<string, unknown> {
+  /** v1.3: Discriminator for the entity type. */
+  actor_type?: ActorType;
+  /** v1.3: Tenant/Org isolation ID. Defaults to "madez". */
+  tenant_id?: string;
+  /** v1.3: Display handle for @mentions. */
+  handle?: string;
+}
+
+export type SignalValue =
+  | string
+  | number
+  | boolean
+  | null
+  | SignalValue[]
+  | { [k: string]: SignalValue };
 
 /**
  * A timeline event. The five mandatory camelCase fields (Comms v1.1) are
@@ -40,6 +67,12 @@ export interface TimelineEvent {
   parentCorrelationId?: string;
   /** Optional structured payload. Anything JSON-serializable. */
   payload?: unknown;
+
+  // v1.3 extensions
+  /** v1.3: Discriminator for the source actor family. */
+  speaker_type?: SpeakerType;
+  /** v1.3: Tenant/Org isolation ID. */
+  tenant_id?: string;
 }
 
 export interface TimelineReadOpts {
@@ -79,10 +112,24 @@ export interface AcmiAdapter {
   timelineRead(entityId: EntityId, opts?: TimelineReadOpts): Promise<TimelineEvent[]>;
   timelineSize(entityId: EntityId): Promise<number>;
 
+  // ─── Batch ──────────────────────────────────────────────────────────────
+  /** Optional: execute multiple writes in a single network round-trip. */
+  batch?(ops: BatchOp[]): Promise<void>;
+
   // ─── Lifecycle ──────────────────────────────────────────────────────────
   /** Optional: close any held connections. */
   close?(): Promise<void>;
 }
+
+/**
+ * A write operation that can be part of an `acmi.batch()`.
+ */
+export type BatchOp =
+  | { type: "profileSet"; entityId: EntityId; doc: ProfileDoc }
+  | { type: "profileDelete"; entityId: EntityId }
+  | { type: "signalsSet"; entityId: EntityId; key: string; value: SignalValue }
+  | { type: "signalsDelete"; entityId: EntityId; key: string }
+  | { type: "timelineAppend"; entityId: EntityId; event: TimelineEvent };
 
 /**
  * The high-level ACMI client API. Wraps an adapter with input validation,
@@ -115,7 +162,38 @@ export interface AcmiClient {
     size(entityId: EntityId): Promise<number>;
   };
 
+  /**
+   * Pipeline multiple write operations into a single network round-trip.
+   *
+   * @example
+   * ```ts
+   * await acmi.batch(async (b) => {
+   *   b.profile.set("user:mikey", { name: "Mikey" });
+   *   b.signals.set("user:mikey", "status", "online");
+   *   b.timeline.append("user:mikey", { source: "agent:claude", kind: "sync", summary: "batching" });
+   * });
+   * ```
+   */
+  batch(fn: (b: AcmiBatch) => void | Promise<void>): Promise<void>;
+
   close(): Promise<void>;
+}
+
+/**
+ * The subset of AcmiClient methods available during a batch.
+ */
+export interface AcmiBatch {
+  profile: {
+    set(entityId: EntityId, doc: ProfileDoc): void;
+    delete(entityId: EntityId): void;
+  };
+  signals: {
+    set(entityId: EntityId, key: string, value: SignalValue): void;
+    delete(entityId: EntityId, key: string): void;
+  };
+  timeline: {
+    append(entityId: EntityId, event: Omit<TimelineEvent, "ts"> & { ts?: number }): void;
+  };
 }
 
 /** Validation error thrown when an event is missing Comms v1.1 mandatory fields. */

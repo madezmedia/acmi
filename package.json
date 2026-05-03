@@ -57,7 +57,8 @@
     }
   },
   "bin": {
-    "acmi": "./cli/acmi.mjs"
+    "acmi": "./cli/acmi.mjs",
+    "acmi-conformance": "./cli/conformance.mjs"
   },
   "files": [
     "dist",
@@ -95,6 +96,7 @@
     }
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^2.0.0",
     "ioredis": "^5.0.0",

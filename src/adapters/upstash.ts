@@ -16,6 +16,8 @@ export interface UpstashAdapterConfig {
   prefix?: string;
   /** Optional fetch override for environments that need it (workers, edge runtimes). */
   fetch?: typeof fetch;
+  /** Optional AbortSignal for canceling all requests. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -37,6 +39,7 @@ export class UpstashAdapter implements AcmiAdapter {
   private readonly token: string;
   private readonly prefix: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly signal?: AbortSignal;
 
   constructor(config: UpstashAdapterConfig) {
     if (!config.url) throw new Error("UpstashAdapter: `url` is required");
@@ -45,25 +48,50 @@ export class UpstashAdapter implements AcmiAdapter {
     this.token = config.token;
     this.prefix = config.prefix ?? "acmi";
     this.fetchImpl = config.fetch ?? fetch;
+    this.signal = config.signal;
   }
 
   // ─── Internal: REST call ────────────────────────────────────────────────
 
-  private async cmd<T = unknown>(...args: Array<string | number>): Promise<T> {
-    const res = await this.fetchImpl(`${this.url}/`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(args.map(String)),
-    });
-    if (!res.ok) {
-      throw new Error(`Upstash REST error ${res.status}: ${await res.text()}`);
+  private async fetchWithRetry(path: string, body: string, retries = 5): Promise<any> {
+    let lastError: Error | undefined;
+    for (let i = 0; i < retries; i++) {
+      try {
+        const res = await this.fetchImpl(`${this.url}${path}`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            "Content-Type": "application/json",
+          },
+          body,
+          signal: this.signal,
+        });
+
+        if (res.status === 429) {
+          const delay = Math.pow(2, i) * 100 + Math.random() * 50;
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+
+        if (!res.ok) {
+          throw new Error(`Upstash REST error ${res.status}: ${await res.text()}`);
+        }
+
+        const data = await res.json();
+        if (data.error) throw new Error(`Upstash error: ${data.error}`);
+        return data.result !== undefined ? data.result : data;
+      } catch (err) {
+        lastError = err as Error;
+        if (i === retries - 1) throw err;
+        const delay = Math.pow(2, i) * 100 + Math.random() * 50;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
     }
-    const data = (await res.json()) as { result?: T; error?: string };
-    if (data.error) throw new Error(`Upstash error: ${data.error}`);
-    return data.result as T;
+    throw lastError || new Error("fetchWithRetry failed");
+  }
+
+  private async cmd<T = unknown>(...args: Array<string | number>): Promise<T> {
+    return this.fetchWithRetry("/", JSON.stringify(args.map(String)));
   }
 
   private k(entityId: EntityId, slot: "profile" | "signals" | "timeline"): string {
@@ -137,7 +165,7 @@ export class UpstashAdapter implements AcmiAdapter {
   // ─── Timeline ───────────────────────────────────────────────────────────
 
   async timelineAppend(entityId: EntityId, event: TimelineEvent): Promise<void> {
-    await this.cmd("ZADD", this.k(entityId, "timeline"), event.ts, JSON.stringify(event));
+    await this.cmd("ZADD", this.k(entityId, "timeline"), "NX", event.ts, JSON.stringify(event));
   }
 
   async timelineRead(entityId: EntityId, opts?: TimelineReadOpts): Promise<TimelineEvent[]> {
@@ -155,6 +183,58 @@ export class UpstashAdapter implements AcmiAdapter {
   async timelineSize(entityId: EntityId): Promise<number> {
     const n = await this.cmd<number | string>("ZCARD", this.k(entityId, "timeline"));
     return typeof n === "number" ? n : Number(n) || 0;
+  }
+
+  async batch(ops: any[]): Promise<void> {
+    const commands: any[][] = [];
+    const signalsOps: any[] = [];
+
+    for (const op of ops) {
+      switch (op.type) {
+        case "profileSet":
+          commands.push(["SET", this.k(op.entityId, "profile"), JSON.stringify(op.doc)]);
+          break;
+        case "profileDelete":
+          commands.push(["DEL", this.k(op.entityId, "profile")]);
+          break;
+        case "signalsSet":
+        case "signalsDelete":
+          // Signals are read-modify-write, can't easily batch without LUA.
+          // Collect for sequential execution.
+          signalsOps.push(op);
+          break;
+        case "timelineAppend":
+          commands.push([
+            "ZADD",
+            this.k(op.entityId, "timeline"),
+            "NX",
+            op.event.ts,
+            JSON.stringify(op.event),
+          ]);
+          break;
+      }
+    }
+
+    if (commands.length > 0) {
+      const data = await this.fetchWithRetry(
+        "/pipeline",
+        JSON.stringify(commands.map((c) => c.map(String)))
+      );
+      if (Array.isArray(data)) {
+        for (const r of data) {
+          if (r.error) throw new Error(`Upstash pipeline error: ${r.error}`);
+        }
+      }
+    }
+
+    // Handle signals sequentially
+    for (const op of signalsOps) {
+      if (op.type === "signalsSet") {
+        await this.signalsSet(op.entityId, op.key, op.value);
+      } else if (op.type === "signalsDelete") {
+        await this.signalsDelete(op.entityId, op.key);
+      }
+    }
   }
 }
 

@@ -47,4 +47,31 @@ describe.skipIf(!REDIS_URL)("RedisAdapter — ACMI conformance", () => {
       throw new Error(`${failures.length}/${result.total} failures:\n${detail}`);
     }
   }, 60_000);
+
+  it.skipIf(!process.env.ACMI_TEST_REDIS_URL_FLAKY)(
+    "survives connection loss (simulated via disconnect)",
+    async () => {
+      const { default: Redis } = await import("ioredis");
+      const client = new Redis(process.env.ACMI_TEST_REDIS_URL_FLAKY!, {
+        maxRetriesPerRequest: 1,
+        retryStrategy: (times) => Math.min(times * 50, 2000),
+      });
+      createdClients.push(client as unknown as IoredisLike);
+
+      const adapter = new RedisAdapter({ client: client as unknown as IoredisLike });
+
+      // 1. Initial write
+      await adapter.profileSet("user:resilience", { phase: 1 });
+
+      // 2. Force disconnect
+      client.disconnect();
+
+      // 3. Attempt read (ioredis will try to reconnect)
+      const got = await adapter.profileGet("user:resilience");
+      if (!got || got.phase !== 1) throw new Error("lost data after reconnect");
+
+      await adapter.close();
+    },
+    30_000
+  );
 });
