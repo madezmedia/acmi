@@ -2,7 +2,7 @@
   <img src="./assets/banner.png" alt="ACMI — three keys per entity. That's the whole protocol." width="640">
 </p>
 
-# ACMI — Agentic Context Management Infrastructure
+# ACMI — Agentic Context Memory Interface
 
 [![npm](https://img.shields.io/npm/v/@madezmedia/acmi.svg)](https://www.npmjs.com/package/@madezmedia/acmi)
 [![Protocol v1.2](https://img.shields.io/badge/Protocol-v1.2-2d4a3e)](./SPEC.md)

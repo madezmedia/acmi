@@ -1,6 +1,6 @@
 # ACMI Operator Guide
 
-**Getting started with Agentic Context Management Infrastructure — from zero to a running multi-agent fleet.**
+**Getting started with Agentic Context Memory Interface — from zero to a running multi-agent fleet.**
 
 This guide walks you through setting up ACMI from scratch, connecting your first agent, enabling monitoring, and deploying a production multi-agent coordination system.
 

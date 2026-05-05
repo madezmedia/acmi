@@ -1,4 +1,4 @@
-# Agentic Context Management Infrastructure (ACMI)
+# Agentic Context Memory Interface (ACMI)
 
 ACMI is a universal architectural framework for giving AI agents persistent, real-time context. It replaces fragmented, multi-table database joins with a single, lightning-fast Key-Value engine (Upstash Redis) optimized specifically for LLM context windows.
 
