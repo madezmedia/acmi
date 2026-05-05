@@ -72,6 +72,7 @@ async function main() {
       case 'active':        await cmdActive(rest[0], rest[1], rest[2], rest[3]); break;
       case 'rollup-set':    await cmdRollupSet(rest[0], rest[1]); break;
       case 'cat':           await cmdCat(rest); break;
+      case 'exec':          await cmdExec(rest); break;
       case 'work':          await cmdWork(rest[0], rest.slice(1)); break;
       case '--help':
       case 'help':
@@ -84,9 +85,18 @@ async function main() {
   }
 }
 
+function validateKeySegments(...segments) {
+  for (const s of segments) {
+    if (!s || s === 'undefined' || s === 'null') {
+      throw new Error(`Invalid key segment detected: "${s}". Check your arguments.`);
+    }
+  }
+}
+
 async function cmdProfile(args) {
   const [ns, id, json] = args;
   if (!ns || !id || !json) throw new Error("Usage: acmi profile <ns> <id> '<json>'");
+  validateKeySegments(ns, id);
   const key = `acmi:${ns}:${id}:profile`;
   await redis('SET', key, json);
   await redis('SADD', `acmi:${ns}:list`, id);
@@ -94,8 +104,23 @@ async function cmdProfile(args) {
 }
 
 async function cmdEvent(args) {
-  const [ns, id, source, summary] = args;
+  let [ns, id, source, summary] = args;
+
+  // Fix for 'thread:X' colon-form footgun (CID: acmi-cli-cmdevent-namespace-footgun)
+  // Allows: node acmi.mjs event thread:bentley-pm source "summary"
+  if (ns && ns.includes(':') && !summary) {
+    const parts = ns.split(':');
+    if (parts.length === 2) {
+      summary = source;
+      source = id;
+      id = parts[1];
+      ns = parts[0];
+    }
+  }
+
   if (!ns || !id || !source || !summary) throw new Error("Usage: acmi event <ns> <id> <source> '<summary>'");
+  validateKeySegments(ns, id);
+
   const key = `acmi:${ns}:${id}:timeline`;
   const ts = Date.now();
   const event = JSON.stringify({ ts, source, summary });
@@ -107,6 +132,7 @@ async function cmdEvent(args) {
 async function cmdSignal(args) {
   const [ns, id, json] = args;
   if (!ns || !id || !json) throw new Error("Usage: acmi signal <ns> <id> '<json>'");
+  validateKeySegments(ns, id);
   const key = `acmi:${ns}:${id}:signals`;
   await redis('SET', key, json);
   await redis('SADD', `acmi:${ns}:list`, id);
@@ -294,6 +320,70 @@ async function cmdWork(sub, rest) {
   }
 }
 
+async function cmdExec(args) {
+  const [ns, id, source, ...cmdArgs] = args;
+  if (!ns || !id || !source || !cmdArgs.length) {
+    throw new Error("Usage: acmi exec <ns> <id> <source> <command> [args...]");
+  }
+  
+  validateKeySegments(ns, id);
+  const command = cmdArgs.join(' ');
+  const key = `acmi:${ns}:${id}:timeline`;
+  const correlationId = `exec-${Date.now()}`;
+
+  console.log(`🚀 Executing: ${command}`);
+  
+  // Log tool-call
+  await redis('ZADD', key, Date.now(), JSON.stringify({
+    ts: Date.now(),
+    source,
+    kind: 'tool-call',
+    correlationId,
+    summary: `Executing tool: ${command.slice(0, 100)}`,
+    payload: { command }
+  }));
+
+  const { exec } = await import('child_process');
+  const { promisify } = await import('util');
+  const execAsync = promisify(exec);
+
+  try {
+    const { stdout, stderr } = await execAsync(command);
+    const result = stdout || stderr;
+    
+    // Log tool-result
+    await redis('ZADD', key, Date.now(), JSON.stringify({
+      ts: Date.now(),
+      source,
+      kind: 'tool-result',
+      correlationId,
+      summary: `Tool finished: ${command.split(' ')[0]}`,
+      payload: { 
+        stdout: stdout.slice(0, 5000), 
+        stderr: stderr.slice(0, 1000),
+        status: 'success'
+      }
+    }));
+    
+    console.log(stdout);
+    if (stderr) console.error(stderr);
+  } catch (err) {
+    // Log tool-failure
+    await redis('ZADD', key, Date.now(), JSON.stringify({
+      ts: Date.now(),
+      source,
+      kind: 'tool-result',
+      correlationId,
+      summary: `Tool failed: ${command.split(' ')[0]}`,
+      payload: { 
+        error: err.message,
+        status: 'error'
+      }
+    }));
+    throw err;
+  }
+}
+
 function printHelp() {
   console.log(`
 🧠 Agentic Context Management Infrastructure (ACMI)
@@ -307,6 +397,9 @@ Core:
   node acmi.mjs get <ns> <id>
   node acmi.mjs list <ns>
   node acmi.mjs delete <ns> <id>
+
+Tool Orchestration (Unix-style):
+  node acmi.mjs exec <ns> <id> <source> <cmd>      # run command and log call/result to timeline
 
 Spawn / Identity (imp-7 extension):
   node acmi.mjs bootstrap <agent_id>                       # 6-read context bundle for fresh sessions
@@ -332,6 +425,7 @@ Examples:
   node acmi.mjs profile sales gardine-wilson '{"stage": "proposal"}'
   node acmi.mjs bootstrap claude-engineer
   node acmi.mjs cat thread:bentley-pm agent:bentley --since=24h
+  node acmi.mjs exec work fix-bug-123 agent:claude "npm test"
   node acmi.mjs work create acmi-launch '{"title":"ACMI public launch","owner":"bentley"}'
   node acmi.mjs work event acmi-launch claude-engineer "manifesto draft v0 done" sess_abc123
 `);
