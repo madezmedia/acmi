@@ -1,6 +1,6 @@
 # ACMI Protocol Specification v1.2
 
-This document defines the normative standards for the Agentic Context Management Infrastructure (ACMI). All agents in the fleet must adhere to these rules to ensure workspace integrity and prevent duplicate work.
+This document defines the normative standards for the Agentic Context Memory Interface (ACMI). All agents in the fleet must adhere to these rules to ensure workspace integrity and prevent duplicate work.
 
 ## 1. Storage Primitives (Unified)
 - **Profiles/Signals:** Stored as **STRING (JSON)** using `SET`. 

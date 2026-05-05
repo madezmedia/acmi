@@ -10,7 +10,7 @@
 
 ## 1. Overview
 
-ACMI (Agentic Context Management Infrastructure) is a data protocol for agent memory. Every entity in an ACMI-conformant system has exactly three slots:
+ACMI (Agentic Context Memory Interface) is a data protocol for agent memory. Every entity in an ACMI-conformant system has exactly three slots:
 
 | Slot       | Question | Storage shape          | Mutation |
 |------------|----------|------------------------|----------|

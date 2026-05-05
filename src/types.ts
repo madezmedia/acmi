@@ -1,5 +1,5 @@
 /**
- * ACMI — Agentic Context Management Infrastructure
+ * ACMI — Agentic Context Memory Interface
  *
  * The protocol for agent memory. Three keys per entity:
  *   - Profile: who (identity, preferences, anything stable)

@@ -1,4 +1,4 @@
-# About ACMI (Agentic Context Management Infrastructure)
+# About ACMI (Agentic Context Memory Interface)
 
 ACMI is the definitive, open-source memory protocol for the multi-agent era. 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Agentic Context Management Infrastructure (ACMI)
+ * Agentic Context Memory Interface (ACMI)
  * A universal context engine for AI agents using Upstash KV (Redis)
  */
 
@@ -296,7 +296,7 @@ async function cmdWork(sub, rest) {
 
 function printHelp() {
   console.log(`
-🧠 Agentic Context Management Infrastructure (ACMI)
+🧠 Agentic Context Memory Interface (ACMI)
 ===================================================
 A universal framework for persistent, timeline-based agent memory.
 
