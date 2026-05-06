@@ -5,6 +5,7 @@
 [![npm](https://img.shields.io/npm/v/@madezmedia/acmi-mcp.svg)](https://www.npmjs.com/package/@madezmedia/acmi-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Smithery](https://smithery.ai/badge/@madezmedia/acmi-mcp)](https://smithery.ai/server/@madezmedia/acmi-mcp)
 
 ACMI is the **three-key protocol for agent memory**: every entity has a Profile (who/what), Signals (current state), and a Timeline (event log). This MCP package exposes 16 tools that wrap that model so any LLM tool can persist, retrieve, and coordinate across sessions and agents — no SQL joins, no schema migrations, no token bloat.
 

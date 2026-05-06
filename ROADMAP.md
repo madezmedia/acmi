@@ -1,6 +1,6 @@
 # ACMI Roadmap
 
-This is a living document. Items move, get cut, ship faster, ship slower. Last updated 2026-05-02.
+This is a living document. Items move, get cut, ship faster, ship slower. Last updated 2026-05-06.
 
 The protocol's value is in restraint. Anything that doesn't serve the three-keys-per-entity thesis (Profile / Signals / Timeline) gets pushed to a later version or to an extension.
 
@@ -26,24 +26,35 @@ The protocol's value is in restraint. Anything that doesn't serve the three-keys
 
 ## In progress
 
-### v1.3 — Multi-actor + Multi-tenant (May 2026)
+### v1.3 — Multi-actor + Multi-tenant + MCP Server (May 2026)
 Additive only. v1.2 deployments continue to work without modification.
 
 - **§11 Multi-actor** — REQUIRED `actor_type` field on profiles (`agent` / `human` / `system` / `external`). SDK auto-fills from entity-id namespace. Per-actor HITL queues. Dual-projection collisions deprecated.
 - **§12 Multi-tenant** — OPTIONAL `tenant_id` field. `acmi:tenant:<id>:*` key prefix convention. Cross-tenant `tenant_id: "shared"` for registries and coordination threads.
+- **§13 MCP Server** — Model Context Protocol server exposing 14 ACMI tools via stdio transport. Compatible with Claude Desktop, Cursor, Cline, Windsurf.
 
-Status: SPEC text drafted in `SPEC.md` §11–§12. SDK code updates and conformance suite extensions follow in `1.3.0-beta.1+`. Migration is phased; live keyspace writes gated on per-phase ratification.
+Status: §11–§12 SPEC drafted. MCP server v1 built + smoke-tested 2026-05-05. 9 bugs found, P0 hardening pending. CLI BUG-008 (flag parsing) patched same day. SSE transport + multi-tenant workspace CRUD planned for beta.
+
+**MCP bugs (9, found by 3 independent reviewers):**
+P0: missing validateKeySegments, no JSON validation, no try/catch on handlers, missing acmi_delete + acmi_rollup_set.
+P1: Date.now() ZADD same-ms overwrite, no Redis timeout, CLI --kind flag parsing (PATCHED), CLI --correlationId flag parsing (PATCHED).
+P2: no SSE transport.
 
 ---
 
 ## Next
 
-### v1.4 — Federation (target Q3 2026)
+### v1.4 — Consumer Product + Federation (target Q3 2026)
+- **Hosted MCP** — SSE/HTTP transport, API-key auth for cloud agents.
+- **Tenant isolation** — Workspace CRUD via MCP tools, key-prefix based.
+- **Stripe billing** — Free/Pro/Team/Enterprise tiers.
+- **Dashboard** — Next.js + shadcn/ui, 5 screens.
+- **Federation** — Cross-instance agent read/write with explicit grants.
 - Cross-instance ACMI federation: agents in deployment A can read/write entities in deployment B with explicit grants.
 - Tenant interop: a `tenant_id` declared in deployment A is portable to deployment B.
 - Eventually-consistent timeline merging across instances.
 
-### v1.5 — Streaming + change notification (target Q4 2026)
+### v1.5 — Streaming + Observability + Hindsight Integration (target Q4 2026)
 - Native pub/sub on Profile / Signals / Timeline writes.
 - Adapter contract extension: optional `subscribe(entityId, slot, handler)` method.
 - Edge-runtime support (Workers, Vercel Edge, Deno Deploy WebSockets).

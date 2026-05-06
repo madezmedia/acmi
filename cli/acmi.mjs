@@ -67,6 +67,7 @@ async function main() {
       case 'get':           await cmdGet(rest); break;
       case 'list':          await cmdList(rest); break;
       case 'delete':        await cmdDelete(rest); break;
+      case 'redis':         const res = await redis(rest[0], ...rest.slice(1)); console.log(JSON.stringify(res, null, 2)); break;
       case 'bootstrap':     await cmdBootstrap(rest[0]); break;
       case 'spawn':         await cmdSpawn(rest[0], rest[1], rest[2]); break;
       case 'active':        await cmdActive(rest[0], rest[1], rest[2], rest[3]); break;
@@ -84,9 +85,18 @@ async function main() {
   }
 }
 
+function validateKeySegments(...segments) {
+  for (const s of segments) {
+    if (!s || s === 'undefined' || s === 'null') {
+      throw new Error(`Invalid key segment detected: "${s}". Check your arguments.`);
+    }
+  }
+}
+
 async function cmdProfile(args) {
   const [ns, id, json] = args;
   if (!ns || !id || !json) throw new Error("Usage: acmi profile <ns> <id> '<json>'");
+  validateKeySegments(ns, id);
   const key = `acmi:${ns}:${id}:profile`;
   await redis('SET', key, json);
   await redis('SADD', `acmi:${ns}:list`, id);
@@ -94,14 +104,46 @@ async function cmdProfile(args) {
 }
 
 async function cmdEvent(args) {
-  const [ns, id, source, summary] = args;
-  if (!ns || !id || !source || !summary) throw new Error("Usage: acmi event <ns> <id> <source> '<summary>'");
+  // BUG-008 FIX: Handle both --kind=VALUE and --kind VALUE flag styles.
+  // Previously --kind VALUE leaked both tokens as positional args ("--kind" became summary).
+  const positional = [];
+  let kind = 'note';
+  let correlationId = `acmi-cli-${Date.now()}`;
+  let payloadRaw = null;
+
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.startsWith('--kind=')) {
+      kind = a.slice(7);
+    } else if (a === '--kind' && i + 1 < args.length) {
+      kind = args[++i]; // consume next arg
+    } else if (a.startsWith('--correlationId=')) {
+      correlationId = a.slice(16);
+    } else if (a === '--correlationId' && i + 1 < args.length) {
+      correlationId = args[++i];
+    } else if (a.startsWith('--payload=')) {
+      payloadRaw = a.slice(10);
+    } else if (!a.startsWith('--')) {
+      positional.push(a);
+    }
+    // else: unknown --flag, ignore
+  }
+
+  const [ns, id, source, summary] = positional;
+
+  if (!ns || !id || !source || !summary) {
+    throw new Error("Usage: acmi event <ns> <id> <source> '<summary>' [--kind=<kind>] [--correlationId=<cid>] [--payload='<json>']");
+  }
+
+  const payload = payloadRaw ? tryParse(payloadRaw) : null;
+
   const key = `acmi:${ns}:${id}:timeline`;
   const ts = Date.now();
-  const event = JSON.stringify({ ts, source, summary });
+  const event = JSON.stringify({ ts, source, summary, kind, correlationId, payload });
+  
   await redis('ZADD', key, ts, event);
   await redis('SADD', `acmi:${ns}:list`, id);
-  console.log(`✅ Event logged: ${key} <- ${source}`);
+  console.log(`✅ Event logged: ${key} <- ${source} [kind=${kind}]`);
 }
 
 async function cmdSignal(args) {

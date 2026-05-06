@@ -29,7 +29,8 @@
     "claude-desktop",
     "cursor",
     "cline",
-    "windsurf"
+    "windsurf",
+    "smithery"
   ],
   "author": "Michael Shaw <madezmediapartners@gmail.com>",
   "license": "MIT",
