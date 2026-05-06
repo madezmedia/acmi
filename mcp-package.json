@@ -1,0 +1,53 @@
+{
+  "name": "@madezmedia/acmi-mcp",
+  "version": "1.3.0",
+  "description": "MCP Server for ACMI — Agentic Context Management Infrastructure. 16 tools for persistent agent memory, timeline events, work items, and multi-agent coordination on Upstash Redis.",
+  "type": "module",
+  "main": "mcp-server.mjs",
+  "bin": {
+    "acmi-mcp": "./mcp-server.mjs"
+  },
+  "files": [
+    "mcp-server.mjs",
+    "mcp-server-helpers.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node mcp-server.mjs",
+    "test": "node --test mcp-server.test.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "acmi",
+    "agent-memory",
+    "ai",
+    "redis",
+    "upstash",
+    "multi-agent",
+    "claude-desktop",
+    "cursor",
+    "cline",
+    "windsurf"
+  ],
+  "author": "Michael Shaw <madezmediapartners@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/madezmedia/acmi#readme",
+  "bugs": "https://github.com/madezmedia/acmi/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/madezmedia/acmi.git",
+    "directory": "mcp"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.24.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
