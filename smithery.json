@@ -32,9 +32,9 @@
   ],
   "install": {
     "type": "stdio",
-    "command": "acmi-mcp",
-    "globalInstall": "npm install -g @madezmedia/acmi-mcp",
-    "args": []
+    "command": "npx",
+    "args": ["-y", "@madezmedia/acmi-mcp"],
+    "globalInstall": "npm install -g @madezmedia/acmi-mcp (optional — npx works without it)"
   },
   "configSchema": {
     "type": "object",

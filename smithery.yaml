@@ -20,8 +20,8 @@ startCommand:
   commandFunction:
     |-
     (config) => ({
-      command: 'acmi-mcp',
-      args: [],
+      command: 'npx',
+      args: ['-y', '@madezmedia/acmi-mcp'],
       env: {
         UPSTASH_REDIS_REST_URL: config.upstashRedisRestUrl,
         UPSTASH_REDIS_REST_TOKEN: config.upstashRedisRestToken
