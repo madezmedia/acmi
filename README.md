@@ -12,6 +12,10 @@
 
 > **Product page:** [v3-ten-beta.vercel.app/acmi](https://v3-ten-beta.vercel.app/acmi/) · the canonical narrative, install card, and visual demo of the three-key model.
 
+> **Cross-references:** This is the **protocol + SDK** repo. For the live demo, ops-center dashboard, and OAuth-protected cloud MCP endpoint, see the sibling repo [`madezmedia/acmi-product`](https://github.com/madezmedia/acmi-product). For the hackathon judge demo, see the HF Space [`madezmedia/acmi-timeline-browser`](https://huggingface.co/spaces/madezmedia/acmi-timeline-browser).
+
+> **Try the live demo:** [v3-ten-beta.vercel.app/acmi](https://v3-ten-beta.vercel.app/acmi/) (ops-center) · [HF Space](https://huggingface.co/spaces/madezmedia/acmi-timeline-browser) (multi-framework chain browser)
+
 **ACMI is a universal, namespace-driven framework that gives AI agents persistent, real-time context — replacing fragmented SQL joins and multi-table queries with a single, LLM-optimized Key-Value engine backed by serverless Redis.** Every entity stores exactly three things an LLM needs to make decisions: a **Profile** (who/what is this entity), **Signals** (what does the AI think about it), and a **Timeline** (everything that happened, chronologically, from every source). The result: agents wake up, read one JSON payload, and immediately understand the full context of any deal, ticket, project, or task — no joins, no bloat, no tokens wasted on schema artifacts.
 
 ```
@@ -404,6 +408,18 @@ Run `01` to feel the API; run `02`–`06` against the same Upstash URL to feel f
 ## OpenClaw Integration
 
 If you use [OpenClaw](https://github.com/nicepkg/openclaw), copy the `cli/` directory to `~/.openclaw/skills/acmi/` and the agent will natively understand how to use ACMI to track its own context across sessions.
+
+## Ecosystem
+
+ACMI ships across five public surfaces. This repo is the **protocol + SDK** — the others are downstream of it:
+
+| Surface | Where | What lives there |
+| --- | --- | --- |
+| Protocol + SDK | [`madezmedia/acmi`](https://github.com/madezmedia/acmi) | TypeScript/JS API, manifesto, CLI, MCP server source, conformance suite (this repo) |
+| Live demo + ops-center | [`madezmedia/acmi-product`](https://github.com/madezmedia/acmi-product) | Vercel-hosted marketing, cloud MCP w/ OAuth, live ops-center dashboard |
+| npm | [`@madezmedia/acmi-mcp`](https://www.npmjs.com/package/@madezmedia/acmi-mcp) | `npx -y @madezmedia/acmi-mcp` for stdio MCP |
+| Smithery | [`smithery.ai/servers/madezmediapartners/acmi-mcp`](https://smithery.ai/servers/madezmediapartners/acmi-mcp) | URL-published + stdio listings |
+| HF Space (hackathon demo) | [`madezmedia/acmi-timeline-browser`](https://huggingface.co/spaces/madezmedia/acmi-timeline-browser) | Live multi-framework chain browser |
 
 ## Roadmap
 
