@@ -1,7 +1,8 @@
 {
   "name": "@madezmedia/acmi-mcp",
+  "mcpName": "io.github.madezmedia/acmi-mcp",
   "version": "1.4.0",
-  "description": "MCP Server for ACMI — Agentic Context Management Infrastructure. 16 tools for persistent agent memory, timeline events, work items, and multi-agent coordination on Upstash Redis.",
+  "description": "MCP Server for ACMI — Agentic Context Memory Interface. 16 tools for persistent agent memory, timeline events, work items, and multi-agent coordination on Upstash Redis.",
   "type": "module",
   "main": "mcp-server.mjs",
   "bin": {
