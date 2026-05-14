@@ -12,6 +12,9 @@
 export const VERSION = "1.2.0";
 
 export { createAcmi } from "./client.js";
+export { InMemoryAdapter } from "./adapters/in-memory.js";
+export { RedisAdapter } from "./adapters/redis.js";
+export { UpstashAdapter } from "./adapters/upstash.js";
 export {
   AcmiValidationError,
   type AcmiAdapter,
