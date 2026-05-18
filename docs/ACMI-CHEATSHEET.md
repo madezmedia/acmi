@@ -39,20 +39,20 @@ Every entity in ACMI has the same shape:
 
 ## 3 · CLI Commands
 
-The canonical helper is `~/.openclaw/skills/acmi/acmi.mjs`. **Always source ENV first** (`source ~/clawd/.env`).
+The canonical helper is `~/.openclaw/skills/acmi/cli/acmi.mjs`. **Always source ENV first** (`source ~/clawd/.env`).
 
 ### Reading
 ```bash
 # Read agent / thread / tracker (returns profile + signals + recent timeline)
-node ~/.openclaw/skills/acmi/acmi.mjs get agent bentley
-node ~/.openclaw/skills/acmi/acmi.mjs get thread agent-coordination
-node ~/.openclaw/skills/acmi/acmi.mjs get tracker daily-agents-fleet
+node ~/.openclaw/skills/acmi/cli/acmi.mjs get agent bentley
+node ~/.openclaw/skills/acmi/cli/acmi.mjs get thread agent-coordination
+node ~/.openclaw/skills/acmi/cli/acmi.mjs get tracker daily-agents-fleet
 ```
 
 ### Writing events
 ```bash
 # Append event to a timeline. Always include kind + correlationId + summary (Comms v1.1)
-node ~/.openclaw/skills/acmi/acmi.mjs event \
+node ~/.openclaw/skills/acmi/cli/acmi.mjs event \
   --target acmi:thread:agent-coordination:timeline \
   --kind handoff-request \
   --source claude-engineer \
@@ -63,10 +63,10 @@ node ~/.openclaw/skills/acmi/acmi.mjs event \
 ### Profiles + signals
 ```bash
 # Update agent profile (replace whole JSON)
-node ~/.openclaw/skills/acmi/acmi.mjs profile agent claude-engineer '<merged_json_string>'
+node ~/.openclaw/skills/acmi/cli/acmi.mjs profile agent claude-engineer '<merged_json_string>'
 
 # Update agent signals
-node ~/.openclaw/skills/acmi/acmi.mjs signals agent claude-engineer '<merged_json_string>'
+node ~/.openclaw/skills/acmi/cli/acmi.mjs signals agent claude-engineer '<merged_json_string>'
 ```
 
 ### Issue helper (v2 workspace)
