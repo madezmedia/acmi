@@ -8,6 +8,3 @@ coverage/
 .idea/
 .vscode/
 *.tsbuildinfo
-
-# Build artifact for @madezmedia/acmi-mcp publish
-dist-mcp/
