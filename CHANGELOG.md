@@ -4,6 +4,29 @@ All notable changes to `@madezmedia/acmi` are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-05-18
+
+### Added
+- **Multi-actor support** - `actor_type` field on profiles and `speaker_type` on events
+- **Migration script** - `scripts/migrate-v1.3.ts` to resolve namespace collisions and prepare existing deployments
+- **Comprehensive v1.3 types** - TypeScript types updated with ActorType and SpeakerType enums
+- **Enhanced validation** - Event summary length validation (500 char limit)
+- **ACMI v1.3 Compliance** - Full compliance with SPEC-v1.3-PROPOSAL.md §11 and §12
+- **Namespace collision resolution** - Fixed mikey and claude-engineer dual-projection issues
+- **Spurious key cleanup** - Removed orphaned `acmi:user:list` entries
+
+### Changed
+- Version bumped to 1.3.0 reflecting multi-actor and multi-tenant capabilities
+- Enhanced validation with 500-char event summary limit
+- Profile migration script addresses production deployments
+- All conformance tests pass for v1.3.0
+
+### Fixed
+- ActorType enum properly typed as "agent" | "human" | "system" | "external"
+- SpeakerType enum added for event source discrimination
+- Migration script handles long event summaries gracefully
+- Git push to remote repository completed successfully
+
 ## [Unreleased]
 
 ### Added
