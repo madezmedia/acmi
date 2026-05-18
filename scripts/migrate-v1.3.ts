@@ -1,6 +1,5 @@
-import { createAcmi } from "../src/client.js";
-import { RedisAdapter } from "../src/adapters/redis.js";
-import Redis from "ioredis";
+import { createAcmi } from "../dist/index.js";
+import { UpstashAdapter } from "../dist/adapters/upstash.js";
 
 /**
  * ACMI v1.3 Migration Script
@@ -23,8 +22,7 @@ async function main() {
   // Since we are running locally, we can use the RedisAdapter with a shim
   // or just hit the REST API directly.
   
-  // Actually, let's use the UpstashAdapter directly to be safe with the environment.
-  const { UpstashAdapter } = await import("../src/adapters/upstash.js");
+  // Use the built UpstashAdapter
   const adapter = new UpstashAdapter({ url, token });
   const acmi = createAcmi(adapter);
 
@@ -58,7 +56,12 @@ async function migrateTimeline(from: string, to: string, acmi: any) {
     console.log(`  Found ${events.length} events. Appending to ${to}...`);
     for (const ev of events) {
       // Use batch for efficiency? For migration, one-by-one is safer for logging.
-      await acmi.timeline.append(to, ev);
+      // Truncate long summaries to meet validation
+      const eventCopy = { ...ev };
+      if (eventCopy.summary && eventCopy.summary.length > 500) {
+        eventCopy.summary = eventCopy.summary.substring(0, 497) + "...";
+      }
+      await acmi.timeline.append(to, eventCopy);
     }
   }
 
