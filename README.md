@@ -1,43 +1,51 @@
 <p align="center">
-  <img src="https://v3b.fal.media/files/b/0a98cb49/ns7vLT2QV8YBH1LTtzSXr.jpg" alt="ACMI Protocol Hero" width="800">
+  <img src="./assets/banner.svg" alt="ACMI v1.5 banner" width="960">
 </p>
 
-# ACMI — Agentic Context Memory Interface
+# ACMI - Agentic Context Memory Interface
 
 [![npm](https://img.shields.io/npm/v/@madezmedia/acmi.svg)](https://www.npmjs.com/package/@madezmedia/acmi)
-[![Protocol v1.3](https://img.shields.io/badge/Protocol-v1.3-2d4a3e)](./SPEC.md)
+[![Protocol v1.5](https://img.shields.io/badge/Protocol-v1.5-2d4a3e)](./SPEC.md)
+[![MCP v1.5.0](https://img.shields.io/badge/MCP-v1.5.0-2d4a3e)](./mcp/README.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![Conformance: 36/36](https://img.shields.io/badge/Conformance-36%2F36-2d4a3e)](./tests)
 
-> **Product page:** [v3-ten-beta.vercel.app/acmi](https://v3-ten-beta.vercel.app/acmi/) · the canonical narrative, install card, and visual demo of the three-key model.
+> The coordination backbone for AI agent fleets. Three Redis keys - Profile, Signals, Timeline.
 
-**ACMI is a universal, namespace-driven framework that gives AI agents persistent, real-time context — replacing fragmented SQL joins and multi-table queries with a single, LLM-optimized Key-Value engine backed by serverless Redis.** Every entity stores exactly three things an LLM needs to make decisions: a **Profile** (who/what is this entity), **Signals** (what does the AI think about it), and a **Timeline** (everything that happened, chronologically, from every source).
+ACMI is the open protocol for persistent agent context. Version `v1.5` formalizes **Fleet Comms Protocol**: atomic pre/post events, wake-directives, handoff-ack chains, and correlation-aware timelines that make multi-agent work auditable instead of anecdotal.
 
+Every entity stores exactly three things an LLM needs to make decisions:
+
+```text
+Profile  -> who   (identity, preferences, stable facts)
+Signals  -> now   (current state, blockers, next action)
+Timeline -> then  (append-only event log from every source)
 ```
-Profile  →  who   (identity, preferences — stable)
-Signals  →  now   (current state — what's open, what's pending)
-Timeline →  then  (append-only event log)
-```
 
----
+The shape is intentionally small:
 
-## 🚀 Issues Agent: 48h Resolution SLA
-We run an **ACMI-native Issues Agent** that monitors this repository. 
-- **Instant Logging**: Every GitHub issue is instantly mirrored to our ACMI coordination thread.
-- **48h SLA**: We aim to have all verified bugs and priority features fixed or resolved in **under 48 hours**.
-- **Agentic Fixes**: Our multi-agent fleet (Claude, Gemini, Codex) collaborates to implement, test, and verify fixes automatically.
+- **Profile**: stable identity and configuration.
+- **Signals**: mutable state and synthesized working memory.
+- **Timeline**: immutable history, ordered by time.
 
----
+This repo ships the public ACMI package, the MCP server subpackage, and the docs that keep the fleet aligned:
 
-## 💎 Sponsorship & Support
-ACMI is an open MIT protocol. We are seeking partners who believe in the future of autonomous agent fleets.
-- **Infrastructure Partners**: Upstash, Redis, Vercel.
-- **Protocol Adopters**: Companies building reliable swarm architectures.
+- `@madezmedia/acmi` - the TypeScript SDK, CLI, and conformance suite.
+- `mcp/` - `@madezmedia/acmi-mcp`, the MCP server for hosts that need direct ACMI access.
+- `SPEC.md` - canonical protocol spec.
+- `CHANGELOG.md` - release history, including the `v1.5.0` fleet-comms update.
+- `docs/` - operator guide, cheatsheet, and protocol notes.
 
-Read more in our [**Sponsorship Drive (ABOUT.md)**](./ABOUT.md).
+## What v1.5 adds
 
----
+The `v1.5.0` release aligns the fleet around a shared event language:
+
+- atomic commit pre/post events
+- roundtable coordination and wake-directives
+- `source`, `kind`, `correlationId`, `summary` event envelope discipline
+- signal freshness checks before action
+- `agent:<id>` source naming across the fleet
 
 ## Install
 
@@ -45,7 +53,7 @@ Read more in our [**Sponsorship Drive (ABOUT.md)**](./ABOUT.md).
 npm install @madezmedia/acmi
 ```
 
-## 10-line example
+## Quick start
 
 ```ts
 import { createAcmi } from "@madezmedia/acmi";
@@ -53,19 +61,24 @@ import { InMemoryAdapter } from "@madezmedia/acmi/adapters/in-memory";
 
 const acmi = createAcmi(new InMemoryAdapter());
 
-await acmi.profile.set("user:mikey", { name: "Mikey", tz: "America/New_York" });
-await acmi.signals.set("user:mikey", "current_task", "shooting ACMI manifesto");
-await acmi.timeline.append("user:mikey", {
-  source: "user:mikey",
-  kind: "started_recording",
-  correlationId: "manifesto-001",
-  summary: "video 1 of 3",
+await acmi.profile.set("user:mikey", {
+  name: "Michael Shaw",
+  role: "operator",
+  location: "Charlotte, NC, USA",
 });
 
-console.log(await acmi.timeline.read("user:mikey"));
+await acmi.signals.set("user:mikey", "current_focus", "ACMI v1.5 fleet sync");
+
+await acmi.timeline.append("user:mikey", {
+  ts: Date.now(),
+  source: "user:mikey",
+  kind: "coord-note",
+  correlationId: "acmiReadmeRefresh-0001",
+  summary: "[coord-note @fleet] README aligned to v1.5 and local assets.",
+});
 ```
 
-## Production: connect to Upstash (edge-compatible)
+## Production adapters
 
 ```ts
 import { createAcmi } from "@madezmedia/acmi";
@@ -79,35 +92,53 @@ const acmi = createAcmi(
 );
 ```
 
-## Adapters
+| Adapter | Use case | Edge-compatible |
+|---|---|---|
+| `@madezmedia/acmi/adapters/in-memory` | tests, examples, local dev | n/a |
+| `@madezmedia/acmi/adapters/upstash` | Vercel, Workers, edge runtimes | yes |
+| `@madezmedia/acmi/adapters/redis` | self-hosted Redis / Node | no |
 
-| Adapter | Use case | Edge-compat | Status |
-|---|---|---|---|
-| `@madezmedia/acmi/adapters/in-memory` | Tests, examples, dev | n/a | ✅ stable |
-| `@madezmedia/acmi/adapters/upstash` | Edge runtimes (Workers, Vercel Edge, Deno Deploy) | ✅ | ✅ stable |
-| `@madezmedia/acmi/adapters/redis` | Self-hosted / Node.js (`ioredis`) | ❌ | ✅ stable |
+## Fleet protocol
 
----
+ACMI v1.5 uses a shared event format so every significant action can be traced:
 
-## v1.3 Protocol Highlights (Multi-Actor & Multi-Tenant)
+```json
+{
+  "ts": 1780000000000,
+  "source": "agent:codex",
+  "kind": "handoff-ack",
+  "correlationId": "codexGrantDraft-1780000000000",
+  "summary": "[handoff-ack @ops-center] Draft ready for review."
+}
+```
 
-The full protocol lives in [`SPEC.md`](./SPEC.md). v1.3 adds:
-- **`actor_type`**: Formal distinction between `agent`, `human`, and `system`.
-- **`tenant_id`**: Secure isolation for multiple clients and organizations.
-- **Auto-Fill Logic**: SDK handles schema-compliance with zero-boilerplate.
+Rules that matter in practice:
 
----
+- use `[kind-tag @recipient]` in summaries
+- keep `source` prefixed with `agent:`, `user:`, or `system:`
+- link follow-up events with `parentCorrelationId`
+- keep the timeline append-only
+- verify signals before acting when the workflow depends on current state
 
-## The Fleet
+## Related surfaces
 
-ACMI coordinates a multi-agent fleet:
-- **bentley**: Orchestrator & Sales Lead.
-- **claude-engineer**: RL Engine & Primary Coder.
-- **gemini-cli**: INFRA / Memory Lead & Protocol Specialist.
-- **antigravity**: UI / UX & Visual Designer.
+- [ACMI Product / live demo](https://v3-ten-beta.vercel.app/acmi/)
+- [ACMI Operator Surface](https://swarm.madezmedia.com)
+- [ACMI MCP server README](./mcp/README.md)
+- [Operator Guide](./docs/OPERATOR-GUIDE.md)
+- [ACMI Cheatsheet](./docs/ACMI-CHEATSHEET.md)
+- [Changelog](./CHANGELOG.md)
 
----
+## The fleet
+
+ACMI is used across the Mad EZ Media fleet as the common context layer for:
+
+- `ops-center` - orchestration and routing
+- `bentley` - comms and governance
+- `codex` - coding and implementation support
+- `hermes` - deep scans and guardian checks
+- `android-worker` - mobile bridge and notifications
 
 ## License
 
-[MIT](./LICENSE) © Michael Shaw / [Mad EZ Media](https://www.madezmedia.com)
+[MIT](./LICENSE) - Copyright Michael Shaw / Mad EZ Media

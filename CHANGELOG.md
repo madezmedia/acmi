@@ -1,3 +1,18 @@
+## v1.5.0 - 2026-05-29
+
+### Added
+- **Fleet Comms Protocol** — atomic commit pre/post events with correlationId chains
+- **Roundtable coordination** — multi-agent kickoff with wake-directives and handoff-ack flow
+- **Event envelope standard** — source, kind, correlationId, summary quad required
+- **Signal freshness verification** — cron/agent sessions verify ACMI signals before acting
+- **64 agents force-aligned to v1.5** — Bentley, Avery, grok, opencode, design-agency, and fleet
+
+### Changed
+- All agents now use `source: "agent:<id>"` format (never bare ID)
+- Event summaries follow `[kind-tag @recipient] <one-line>` convention
+- MCP server version bumped to 1.5.0
+
+
 # Changelog
 
 All notable changes to `@madezmedia/acmi` are documented here.

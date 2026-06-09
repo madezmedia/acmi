@@ -1,14 +1,34 @@
-<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
-  <rect width="1200" height="630" fill="#faf9f5" />
-  <text x="100" y="250" font-family="Source Serif 4, Source Serif Pro, Georgia, serif" font-style="italic" font-weight="900" font-size="64" fill="#2d4a3e">Three keys per entity.</text>
-  <text x="100" y="330" font-family="Source Serif 4, Source Serif Pro, Georgia, serif" font-style="italic" font-weight="900" font-size="64" fill="#2d4a3e">That’s the whole protocol.</text>
-  <line x1="100" y1="345" x2="780" y2="345" stroke="#2d4a3e" stroke-width="4" />
-  
-  <text x="100" y="530" font-family="monospace" font-size="24" fill="#666">npm install @madezmedia/acmi</text>
-  
-  <g transform="translate(1000, 480)">
-    <rect x="0" y="20" width="15" height="30" fill="#2d4a3e" />
-    <rect x="25" y="0" width="15" height="50" fill="#2d4a3e" />
-    <rect x="50" y="10" width="15" height="40" fill="#2d4a3e" />
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">ACMI Open Graph image</title>
+  <desc id="desc">ACMI v1.5 visual with profile, signals, and timeline pillars.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7f2e7" />
+      <stop offset="100%" stop-color="#efe4d1" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)" />
+  <path d="M0 534 C160 490, 240 610, 420 548 S740 514, 920 546 S1080 580, 1200 520 L1200 630 L0 630 Z" fill="#eadcc6" opacity="0.7" />
+  <text x="84" y="96" font-family="monospace" font-size="18" letter-spacing="2" fill="#27473d">ACMI v1.5</text>
+  <text x="84" y="232" font-family="Source Serif 4, Georgia, serif" font-style="italic" font-weight="900" font-size="86" fill="#27473d">Profile / Signals / Timeline</text>
+  <text x="84" y="298" font-family="Source Serif 4, Georgia, serif" font-style="italic" font-weight="800" font-size="34" fill="#406556">Fleet Comms Protocol for aligned multi-agent work</text>
+  <text x="84" y="410" font-family="monospace" font-size="24" fill="#27473d">Three keys per entity. That&apos;s the whole protocol.</text>
+  <rect x="84" y="456" width="292" height="40" rx="20" fill="#27473d" />
+  <text x="108" y="482" font-family="monospace" font-size="18" fill="#f7f2e7">npm install @madezmedia/acmi</text>
+  <g transform="translate(760,116)">
+    <rect x="0" y="0" width="344" height="372" rx="28" fill="#f7f2e7" stroke="#cdbda1" stroke-width="2" />
+    <circle cx="74" cy="90" r="18" fill="#27473d" />
+    <circle cx="74" cy="176" r="18" fill="#406556" />
+    <circle cx="74" cy="262" r="18" fill="#a86f3f" />
+    <path d="M74 108 V158" stroke="#27473d" stroke-width="5" stroke-linecap="round" />
+    <path d="M74 194 V244" stroke="#406556" stroke-width="5" stroke-linecap="round" />
+    <text x="112" y="94" font-family="monospace" font-size="20" fill="#27473d">Profile</text>
+    <text x="112" y="122" font-family="monospace" font-size="14" fill="#6a6255">who / stable facts</text>
+    <text x="112" y="180" font-family="monospace" font-size="20" fill="#406556">Signals</text>
+    <text x="112" y="208" font-family="monospace" font-size="14" fill="#6a6255">now / blockers / next action</text>
+    <text x="112" y="266" font-family="monospace" font-size="20" fill="#a86f3f">Timeline</text>
+    <text x="112" y="294" font-family="monospace" font-size="14" fill="#6a6255">then / append-only log</text>
+    <rect x="34" y="322" width="276" height="20" rx="10" fill="#e4d3bb" />
+    <text x="54" y="337" font-family="monospace" font-size="13" fill="#27473d">wake-directive -> handoff-ack -> work-completed</text>
   </g>
 </svg>
