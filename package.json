@@ -1,7 +1,7 @@
 {
   "name": "@madezmedia/acmi",
-  "version": "1.3.0",
-  "description": "ACMI — the protocol for agent memory. Three keys: Profile / Signals / Timeline.",
+  "version": "2.0.0",
+  "description": "ACMI \u2014 the protocol for agent memory. Three keys: Profile / Signals / Timeline.",
   "keywords": [
     "ai",
     "agents",

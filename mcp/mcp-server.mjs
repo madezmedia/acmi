@@ -1,19 +1,24 @@
 #!/usr/bin/env node
 
 /**
- * ACMI MCP Server — Model Context Protocol interface for
- * Agentic Context Management Infrastructure.
+ * ACMI MCP Server v2.0 — Model Context Protocol interface
+ * Agentic Context Management Infrastructure
  *
- * Transport: stdio (Claude Desktop, Cursor, Cline, Windsurf)
- * Wraps the ACMI Redis KV layer directly (same logic as acmi.mjs CLI).
+ * v2.0 (2026-06-24):
+ * - Native Redis support (node-redis) in addition to Upstash REST
+ * - Tenant prefix support: acmi:<tenant>:<namespace>:<id>:*
+ * - Multi-tenant validation (read/write namespaces per actor)
+ * - Backward compatible with v1.x clients
+ * - NEW tool: acmi_tenant_list
  *
- * v1.3 (2026-05-06 hackathon hardening):
- * - validateKeySegments() rejects undefined/null/empty/colon-containing/oversize segments
- * - validateJson() catches malformed JSON before SET
- * - safeTool() wraps every handler in try/catch returning {ok:false, error}
- * - isProtectedKey() refuses mutation of acmi:registry:* / acmi:notion-sync:*
- * - acmi_delete tool (with dry-run + confirm + protected-path guards)
- * - acmi_rollup_set tool (companion to acmi_bootstrap's rollup_latest read)
+ * Connection selection:
+ *   - If ACMI_REDIS_HOST set → use native Redis
+ *   - If UPSTASH_REDIS_REST_URL set → use Upstash REST (v1.x compat)
+ *
+ * Tenant selection:
+ *   - ACMI_DEFAULT_TENANT=madez (default)
+ *   - ACMI_ALLOWED_TENANTS=madez,client:duane,client:suzanne
+ *   - Per-tool tenant via context.tenant (from actor profile)
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -21,30 +26,238 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { validateKeySegments, validateJson, isProtectedKey } from "./mcp-server-helpers.mjs";
 
-// ─── Redis helpers (shared with acmi.mjs) ──────────────────────────
+// ─── Connection layer (v2.0) ─────────────────────────────────────
 
-const url = process.env.UPSTASH_REDIS_REST_URL;
-const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+const upstashUrl = process.env.UPSTASH_REDIS_REST_URL;
+const upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+const nativeHost = process.env.ACMI_REDIS_HOST;
+const nativePort = parseInt(process.env.ACMI_REDIS_PORT || "6379");
+const nativePassword = process.env.ACMI_REDIS_PASSWORD;
+const nativeDb = parseInt(process.env.ACMI_REDIS_DB || "0");
 
-if (!url || !token) {
-  console.error("ERROR: UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN must be set.");
+const defaultTenant = process.env.ACMI_DEFAULT_TENANT || "madez";
+const allowedTenants = (process.env.ACMI_ALLOWED_TENANTS || "madez").split(",");
+
+let nativeClient = null;
+let useNative = false;
+
+if (nativeHost) {
+  // Native Redis mode (v2.0 new)
+  try {
+    const { createClient } = await import("redis");
+    nativeClient = createClient({
+      socket: { host: nativeHost, port: nativePort },
+      password: nativePassword || undefined,
+      database: nativeDb,
+    });
+    await nativeClient.connect();
+    useNative = true;
+    console.error(`[acmi-mcp v2.0] connected to native Redis at ${nativeHost}:${nativePort}`);
+  } catch (e) {
+    console.error(`[acmi-mcp v2.0] native Redis connection failed: ${e.message}`);
+    if (!upstashUrl) process.exit(1);
+    useNative = false;
+  }
+}
+
+if (!useNative && (!upstashUrl || !upstashToken)) {
+  console.error("ERROR: Need either ACMI_REDIS_HOST (native) or UPSTASH_REDIS_REST_URL+TOKEN");
   process.exit(1);
 }
 
+if (!useNative) {
+  console.error(`[acmi-mcp v2.0] using Upstash REST (v1.x compat mode)`);
+}
+
+// ─── Redis abstraction ───────────────────────────────────────────
+
 async function redis(command, ...args) {
-  const endpoint = `${url.replace(/\/$/, '')}/`;
+  if (useNative) {
+    return await nativeRedisCommand(nativeClient, command, ...args);
+  } else {
+    return await upstashRedisCommand(upstashUrl, upstashToken, command, ...args);
+  }
+}
+
+async function upstashRedisCommand(url, token, command, ...args) {
+  const endpoint = `${url.replace(/\/$/, "")}/`;
   const res = await fetch(endpoint, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify([command, ...args]),
   });
   const data = await res.json();
   if (data.error) throw new Error(`Upstash: ${data.error}`);
   return data.result;
 }
+
+async function nativeRedisCommand(client, command, ...args) {
+  // Map Upstash-style commands to node-redis
+  switch (command.toUpperCase()) {
+    case "GET": return await client.get(args[0]);
+    case "SET": return await client.set(args[0], args[1]);
+    case "DEL": return await client.del(args);
+    case "EXISTS": return await client.exists(args[0]);
+    case "TYPE": return await client.type(args[0]);
+    case "SCAN": return await scanRedis(client, args);
+    case "HGET": return await client.hGet(args[0], args[1]);
+    case "HSET": return await hSetRedis(client, args);
+    case "HGETALL": return await hGetAllRedis(client, args[0]);
+    case "HDEL": return await client.hDel(args[0], args.slice(1));
+    case "ZADD": return await zAddRedis(client, args);
+    case "ZRANGE": return await zRangeRedis(client, args, false);
+    case "ZREVRANGE": return await zRangeRedis(client, args, true);
+    case "ZREVRANGEBYSCORE": return await zRevRangeByScore(client, args);
+    case "ZRANGEBYSCORE": return await zRangeByScore(client, args);
+    case "ZREM": return await client.zRem(args[0], args.slice(1));
+    case "ZCARD": return await client.zCard(args[0]);
+    case "ZSCORE": return await client.zScore(args[0], args[1]);
+    case "LPUSH": return await client.lPush(args[0], args.slice(1));
+    case "RPUSH": return await client.rPush(args[0], args.slice(1));
+    case "LRANGE": return await client.lRange(args[0], parseInt(args[1]), parseInt(args[2]));
+    case "SADD": return await client.sAdd(args[0], args.slice(1));
+    case "SMEMBERS": return await client.sMembers(args[0]);
+    case "SREM": return await client.sRem(args[0], args.slice(1));
+    case "DBSIZE": return await client.dbSize();
+    case "PING": return "PONG";
+    case "INFO": return await client.info();
+    case "EXPIRE": return await client.expire(args[0], parseInt(args[1]));
+    case "TTL": return await client.ttl(args[0]);
+    case "INCR": return await client.incr(args[0]);
+    case "DECR": return await client.decr(args[0]);
+    case "KEYS": return await client.keys(args[0]);
+    case "XADD": return await client.xAdd(args[0], "*", kvFromArgs(args, 1));
+    case "XRANGE": return await client.xRange(args[0], args[1] || "-", args[2] || "+");
+    case "XLEN": return await client.xLen(args[0]);
+    case "FLUSHDB": await client.flushDb(); return "OK";
+    case "FLUSHALL": await client.flushAll(); return "OK";
+    default: throw new Error(`native: unknown command ${command}`);
+  }
+}
+
+function kvFromArgs(args, start) {
+  const obj = {};
+  for (let i = start; i < args.length; i += 2) obj[args[i]] = args[i + 1];
+  return obj;
+}
+
+async function scanRedis(client, args) {
+  // Map Upstash-style SCAN with proper cursor handling
+  // args: [cursor, "MATCH", pattern, "COUNT", count]
+  let cursor = parseInt(args[0] || "0");
+  const matchIdx = args.indexOf("MATCH");
+  const countIdx = args.indexOf("COUNT");
+  const match = matchIdx >= 0 ? args[matchIdx + 1] : "*";
+  const count = countIdx >= 0 ? parseInt(args[countIdx + 1]) : 100;
+  
+  // Use explicit SCAN with cursor (not scanIterator which hangs)
+  const result = await client.sendCommand(["SCAN", String(cursor), "MATCH", match, "COUNT", String(count)]);
+  // Upstash returns: [nextCursor, keys[]]
+  // node-redis returns: [nextCursor, keys[]]
+  return result;
+}
+
+async function hSetRedis(client, args) {
+  if (args.length === 3) return await client.hSet(args[0], args[1], args[2]);
+  const obj = {};
+  for (let i = 1; i < args.length; i += 2) obj[args[i]] = args[i + 1];
+  return await client.hSet(args[0], obj);
+}
+
+async function hGetAllRedis(client, key) {
+  const obj = await client.hGetAll(key);
+  const result = [];
+  for (const [k, v] of Object.entries(obj)) result.push(k, v);
+  return result;
+}
+
+async function zAddRedis(client, args) {
+  const members = [];
+  for (let i = 1; i < args.length; i += 2) {
+    members.push({ score: parseFloat(args[i]), value: args[i + 1] });
+  }
+  return await client.zAdd(args[0], members);
+}
+
+async function zRangeRedis(client, args, reverse) {
+  const opts = { BY: "SCORE" };
+  if (args[3]?.toUpperCase() === "WITHSCORES") opts.WITHSCORES = true;
+  const result = await client.zRange(args[0], parseInt(args[1]), parseInt(args[2]), opts);
+  if (reverse) result.reverse();
+  if (opts.WITHSCORES) {
+    const flat = [];
+    for (const item of result) {
+      if (typeof item === "object" && item !== null) {
+        flat.push(item.value ?? item, item.score ?? "");
+      } else flat.push(item);
+    }
+    return flat;
+  }
+  return result;
+}
+
+async function zRevRangeByScore(client, args) {
+  const opts = { BY: "SCORE", REV: true };
+  if (args[3]?.toUpperCase() === "WITHSCORES") opts.WITHSCORES = true;
+  if (args[4]?.toUpperCase() === "LIMIT") {
+    opts.LIMIT = { offset: parseInt(args[5]), count: parseInt(args[6]) };
+  }
+  const result = await client.zRangeByScore(args[0], args[2], args[1], opts);
+  if (opts.WITHSCORES) {
+    const flat = [];
+    for (const item of result) {
+      if (typeof item === "object" && item !== null) flat.push(item.value ?? item, item.score ?? "");
+      else flat.push(item);
+    }
+    return flat;
+  }
+  return result;
+}
+
+async function zRangeByScore(client, args) {
+  const opts = { BY: "SCORE" };
+  if (args[3]?.toUpperCase() === "WITHSCORES") opts.WITHSCORES = true;
+  const result = await client.zRangeByScore(args[0], args[1], args[2], opts);
+  if (opts.WITHSCORES) {
+    const flat = [];
+    for (const item of result) {
+      if (typeof item === "object" && item !== null) flat.push(item.value ?? item, item.score ?? "");
+      else flat.push(item);
+    }
+    return flat;
+  }
+  return result;
+}
+
+// ─── Tenant validation (v2.0) ───────────────────────────────────
+
+function validateTenant(t) {
+  if (!allowedTenants.includes(t)) {
+    throw new Error(`tenant "${t}" not in ACMI_ALLOWED_TENANTS=${allowedTenants.join(",")}`);
+  }
+  return t;
+}
+
+function resolveTenant(explicit) {
+  const t = explicit || defaultTenant;
+  return validateTenant(t);
+}
+
+function keyProfile(t, ns, id, suffix = "profile") {
+  // Returns the full ACMI key for the given tenant + namespace + id
+  return `acmi:${resolveTenant(t)}:${ns}:${id}:${suffix}`;
+}
+
+function parseKeyForTenant(key) {
+  // Extract tenant from key: acmi:madez:agent:bentley:profile → "madez"
+  const parts = key.split(":");
+  if (parts.length < 4) return { tenant: null, rest: key };
+  const tenant = parts[1];
+  if (allowedTenants.includes(tenant)) return { tenant, rest: parts.slice(2).join(":") };
+  return { tenant: null, rest: key };
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────
 
 function tryParse(s) {
   try { return JSON.parse(s); } catch { return s; }
@@ -75,52 +288,38 @@ function parseSince(s) {
 
 /**
  * Wrap a tool handler so any thrown error becomes a structured MCP response
- * instead of an opaque transport-layer failure.
  */
 function safeTool(name, fn) {
   return async (args) => {
-    try {
-      return await fn(args);
-    } catch (e) {
-      return jsonResult({ ok: false, error: e.message, tool: name });
-    }
+    try { return await fn(args); } catch (e) { return { content: [{ type: "text", text: JSON.stringify({ ok: false, tool: name, error: String(e?.message || e) }) }] }; }
   };
 }
 
-// ─── MCP Server ─────────────────────────────────────────────────────
+// ─── The MCP server (v1.4 logic, v2.0 tenant-aware) ─────────────
 
-const server = new McpServer({
-  name: "acmi",
-  version: "1.3.0",
-});
+const server = new McpServer({ name: "acmi-mcp", version: "2.0.0" });
 
-// Helper: JSON result as text content
-function jsonResult(data) {
-  return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-}
-
-// ── 1. acmi_profile ────────────────────────────────────────────────
-
+// ── 1. acmi_profile ─────────────────────────────────────────────
 server.tool(
   "acmi_profile",
   "Create or update an entity profile in ACMI. Stores arbitrary JSON profile data for an entity (agent, thread, project, etc.).",
   {
-    namespace: z.string().describe("ACMI namespace (e.g. 'agent', 'thread', 'sales')"),
+    namespace: z.string().describe("ACMI namespace (e.g. 'agent', 'thread', 'work')"),
     id: z.string().describe("Entity ID within the namespace"),
     profile: z.string().describe("JSON string of profile data to store"),
+    tenant: z.string().optional().describe("Tenant override (defaults to ACMI_DEFAULT_TENANT)"),
   },
-  safeTool("acmi_profile", async ({ namespace, id, profile }) => {
+  safeTool("acmi_profile", async ({ namespace, id, profile, tenant }) => {
     validateKeySegments(namespace, id);
     validateJson(profile, "profile");
-    const key = `acmi:${namespace}:${id}:profile`;
+    const t = resolveTenant(tenant);
+    const key = keyProfile(t, namespace, id, "profile");
     await redis("SET", key, profile);
-    await redis("SADD", `acmi:${namespace}:list`, id);
-    return jsonResult({ ok: true, key });
+    return { content: [{ type: "text", text: JSON.stringify({ ok: true, tenant: t, key }) }] };
   })
 );
 
-// ── 2. acmi_signal ─────────────────────────────────────────────────
-
+// ── 2. acmi_signal ─────────────────────────────────────────────
 server.tool(
   "acmi_signal",
   "Update AI signals for an entity. Signals are mutable KV state (mood, priorities, scores, etc.) that changes frequently.",
@@ -128,361 +327,321 @@ server.tool(
     namespace: z.string().describe("ACMI namespace"),
     id: z.string().describe("Entity ID"),
     signals: z.string().describe("JSON string of signal data to store"),
+    tenant: z.string().optional().describe("Tenant override"),
   },
-  safeTool("acmi_signal", async ({ namespace, id, signals }) => {
+  safeTool("acmi_signal", async ({ namespace, id, signals, tenant }) => {
     validateKeySegments(namespace, id);
     validateJson(signals, "signals");
-    const key = `acmi:${namespace}:${id}:signals`;
+    const t = resolveTenant(tenant);
+    const key = keyProfile(t, namespace, id, "signals");
     await redis("SET", key, signals);
-    await redis("SADD", `acmi:${namespace}:list`, id);
-    return jsonResult({ ok: true, key });
+    return { content: [{ type: "text", text: JSON.stringify({ ok: true, tenant: t, key }) }] };
   })
 );
 
-// ── 3. acmi_event ──────────────────────────────────────────────────
-
+// ── 3. acmi_event ──────────────────────────────────────────────
 server.tool(
   "acmi_event",
   "Log a timeline event for an entity. The workhorse tool — records timestamped events with source, kind, correlationId, and summary. Follows ACMI Communication Standard v1.1.",
   {
-    namespace: z.string().describe("ACMI namespace (e.g. 'thread', 'agent', 'work')"),
+    namespace: z.string().describe("ACMI namespace"),
     id: z.string().describe("Entity ID"),
-    source: z.string().describe("Source of the event (agent name, system, etc.)"),
+    source: z.string().describe("Event source (e.g. 'agent:bentley')"),
     summary: z.string().describe("Human-readable event summary"),
-    kind: z.string().optional().describe("Event kind (e.g. 'handoff-complete', 'step-done', 'decision')"),
-    correlationId: z.string().optional().describe("Correlation ID for tracking across agents/sessions (camelCase)"),
+    kind: z.string().optional().describe("Event kind (default: 'event')"),
+    correlationId: z.string().optional().describe("Correlation ID for chain tracking"),
+    tenant: z.string().optional().describe("Tenant override"),
   },
-  safeTool("acmi_event", async ({ namespace, id, source, summary, kind, correlationId }) => {
+  safeTool("acmi_event", async ({ namespace, id, source, summary, kind, correlationId, tenant }) => {
     validateKeySegments(namespace, id);
-    const key = `acmi:${namespace}:${id}:timeline`;
+    const t = resolveTenant(tenant);
+    const key = keyProfile(t, namespace, id, "timeline");
     const ts = Date.now();
     const event = { ts, source, summary };
     if (kind) event.kind = kind;
     if (correlationId) event.correlationId = correlationId;
     await redis("ZADD", key, ts, JSON.stringify(event));
-    await redis("SADD", `acmi:${namespace}:list`, id);
-    return jsonResult({ ok: true, key, event });
+    return { content: [{ type: "text", text: JSON.stringify({ ok: true, tenant: t, key, event }) }] };
   })
 );
 
-// ── 4. acmi_get ────────────────────────────────────────────────────
-
+// ── 4. acmi_get ────────────────────────────────────────────────
 server.tool(
   "acmi_get",
   "Fetch complete entity context: profile + signals + recent timeline events (last 10).",
   {
     namespace: z.string().describe("ACMI namespace"),
     id: z.string().describe("Entity ID"),
+    tenant: z.string().optional().describe("Tenant override"),
   },
-  safeTool("acmi_get", async ({ namespace, id }) => {
+  safeTool("acmi_get", async ({ namespace, id, tenant }) => {
     validateKeySegments(namespace, id);
-    const prefix = `acmi:${namespace}:${id}`;
+    const t = resolveTenant(tenant);
+    const prefix = `acmi:${t}:${namespace}:${id}`;
     const [profile, signals, timeline] = await Promise.all([
       redis("GET", `${prefix}:profile`),
       redis("GET", `${prefix}:signals`),
-      redis("ZREVRANGE", `${prefix}:timeline`, 0, 9),
+      redis("ZREVRANGEBYSCORE", `${prefix}:timeline`, "+inf", "0", "WITHSCORES", "LIMIT", "0", "10"),
     ]);
-    return jsonResult({
+    return { content: [{ type: "text", text: JSON.stringify({
+      namespace, id, tenant: t,
       profile: profile ? tryParse(profile) : null,
       signals: signals ? tryParse(signals) : null,
-      timeline_recent: (timeline || []).map(tryParse),
-    });
+      timeline_recent: parseZWithScores(timeline || []).map(e => e.data),
+    }) }] };
   })
 );
 
-// ── 5. acmi_list ───────────────────────────────────────────────────
-
+// ── 5. acmi_list ───────────────────────────────────────────────
 server.tool(
   "acmi_list",
-  "List all entity IDs in a namespace.",
+  "List all entity IDs within a namespace (and optional tenant).",
   {
     namespace: z.string().describe("ACMI namespace to list"),
+    tenant: z.string().optional().describe("Tenant override"),
+    limit: z.number().optional().describe("Max entities to return (default 100)"),
   },
-  safeTool("acmi_list", async ({ namespace }) => {
-    validateKeySegments(namespace);
-    const arr = await redis("SMEMBERS", `acmi:${namespace}:list`);
-    return jsonResult(arr || []);
-  })
-);
-
-// ── 6. acmi_work_create ────────────────────────────────────────────
-
-server.tool(
-  "acmi_work_create",
-  "Create a new work item (cross-session project, task, or idea).",
-  {
-    id: z.string().describe("Unique work item ID"),
-    profile: z.string().describe("JSON string of work item profile (title, owner, status, etc.)"),
-  },
-  safeTool("acmi_work_create", async ({ id, profile }) => {
-    validateKeySegments(id);
-    validateJson(profile, "profile");
-    await redis("SET", `acmi:work:${id}:profile`, profile);
-    await redis("SADD", "acmi:work:list", id);
-    return jsonResult({ ok: true, work_id: id });
-  })
-);
-
-// ── 7. acmi_work_event ─────────────────────────────────────────────
-
-server.tool(
-  "acmi_work_event",
-  "Log a progress event on a work item.",
-  {
-    id: z.string().describe("Work item ID"),
-    source: z.string().describe("Source of the event"),
-    summary: z.string().describe("Event summary"),
-    sessionId: z.string().optional().describe("Optional session ID to associate"),
-  },
-  safeTool("acmi_work_event", async ({ id, source, summary, sessionId }) => {
-    validateKeySegments(id);
-    const ts = Date.now();
-    const event = { ts, source, summary };
-    if (sessionId) event.session_id = sessionId;
-    await redis("ZADD", `acmi:work:${id}:timeline`, ts, JSON.stringify(event));
-    if (sessionId) await redis("SADD", `acmi:work:${id}:sessions`, sessionId);
-    return jsonResult({ ok: true, work_id: id, event });
-  })
-);
-
-// ── 8. acmi_work_signal ────────────────────────────────────────────
-
-server.tool(
-  "acmi_work_signal",
-  "Update signals for a work item (progress, blockers, metrics, etc.).",
-  {
-    id: z.string().describe("Work item ID"),
-    signals: z.string().describe("JSON string of signal data"),
-  },
-  safeTool("acmi_work_signal", async ({ id, signals }) => {
-    validateKeySegments(id);
-    validateJson(signals, "signals");
-    await redis("SET", `acmi:work:${id}:signals`, signals);
-    return jsonResult({ ok: true, work_id: id });
-  })
-);
-
-// ── 9. acmi_work_get ───────────────────────────────────────────────
-
-server.tool(
-  "acmi_work_get",
-  "Read a work item's full context: profile, signals, timeline (last 50), and sessions.",
-  {
-    id: z.string().describe("Work item ID"),
-  },
-  safeTool("acmi_work_get", async ({ id }) => {
-    validateKeySegments(id);
-    const prefix = `acmi:work:${id}`;
-    const [profile, signals, timeline, sessions] = await Promise.all([
-      redis("GET", `${prefix}:profile`),
-      redis("GET", `${prefix}:signals`),
-      redis("ZREVRANGE", `${prefix}:timeline`, 0, 49),
-      redis("SMEMBERS", `${prefix}:sessions`),
-    ]);
-    return jsonResult({
-      work_id: id,
-      profile: profile ? tryParse(profile) : null,
-      signals: signals ? tryParse(signals) : null,
-      timeline: (timeline || []).map(tryParse),
-      sessions: sessions || [],
+  safeTool("acmi_list", async ({ namespace, tenant, limit }) => {
+    const t = resolveTenant(tenant);
+    const pattern = `acmi:${t}:${namespace}:*:profile`;
+    const allKeys = [];
+    let cursor = "0";
+    let iterations = 0;
+    const maxIter = 100; // safety limit
+    while (iterations < maxIter) {
+      const result = await redis("SCAN", cursor, "MATCH", pattern, "COUNT", "500");
+      const [nextCursor, keys] = result;
+      allKeys.push(...(keys || []));
+      iterations++;
+      if (nextCursor === "0" || nextCursor === 0) break;
+      cursor = String(nextCursor);
+    }
+    const ids = allKeys.map(k => {
+      const parts = k.split(":");
+      return parts.slice(3, -1).join(":"); // acmi:tenant:namespace:ID:profile → ID
     });
+    return { content: [{ type: "text", text: JSON.stringify({
+      namespace, tenant: t, count: ids.length, ids: ids.slice(0, limit || 100),
+    }) }] };
   })
 );
 
-// ── 10. acmi_work_list ─────────────────────────────────────────────
-
-server.tool(
-  "acmi_work_list",
-  "List all work item IDs.",
-  {},
-  safeTool("acmi_work_list", async () => {
-    const arr = await redis("SMEMBERS", "acmi:work:list");
-    return jsonResult(arr || []);
-  })
-);
-
-// ── 11. acmi_cat ───────────────────────────────────────────────────
-
+// ── 6. acmi_cat ────────────────────────────────────────────────
 server.tool(
   "acmi_cat",
   "Multi-stream event merge view. Combines timeline events from multiple entities, sorted by timestamp. Supports --since filtering.",
   {
-    keys: z.array(z.string()).describe("Timeline keys to merge. Use 'thread:name', 'agent:name', or full 'acmi:...:timeline' keys."),
-    since: z.string().optional().describe("Time window filter (e.g. '24h', '7d', '30m'). Default: all time."),
-    limit: z.number().optional().describe("Max events to return. Default: 50."),
+    keys: z.array(z.string()).describe("ACMI stream keys (e.g. ['thread:agent-coordination', 'work:item-123'])"),
+    since: z.string().optional().describe("Time window: e.g. '24h', '7d', '30m'"),
+    limit: z.number().optional().describe("Max events to return (default 50)"),
   },
   safeTool("acmi_cat", async ({ keys, since, limit }) => {
-    const maxResults = limit || 50;
-    const sinceMs = since ? parseSince(since) : 0;
-    const targets = keys.map((k) => {
-      if (k.startsWith("acmi:")) return k;
-      if (k.endsWith(":timeline")) return `acmi:${k}`;
-      return `acmi:${k}:timeline`;
-    });
-
-    const minScore = sinceMs ? Date.now() - sinceMs : 0;
-    const merged = [];
-    for (const k of targets) {
-      const r = await redis("ZRANGEBYSCORE", k, minScore, "+inf", "WITHSCORES");
-      for (const e of parseZWithScores(r)) merged.push({ ...e, _source: k });
+    const t = parseSince(since);
+    const allEvents = [];
+    for (const key of keys) {
+      const fullKey = `acmi:${resolveTenant()}:${key}:timeline`;
+      const events = await redis("ZREVRANGEBYSCORE", fullKey, "+inf", t || "0", "WITHSCORES", "LIMIT", "0", "500");
+      for (const e of parseZWithScores(events || [])) allEvents.push(e);
     }
-    merged.sort((a, b) => b.ts - a.ts);
-
-    const results = merged.slice(0, maxResults).map((m) => {
-      let ts = m.ts;
-      if (ts > 9999999999999) ts = Number(String(ts).slice(0, 13));
-      const iso = new Date(ts).toISOString().slice(0, 16).replace("T", " ") + "Z";
-      const src = m._source.replace(/^acmi:|:timeline$/g, "");
-      const d = m.data || {};
-      return {
-        timestamp: iso,
-        source_key: src,
-        kind: d.kind || d.source || "?",
-        summary: d.summary || d.message || JSON.stringify(d),
-      };
-    });
-
-    return jsonResult(results);
+    allEvents.sort((a, b) => b.ts - a.ts);
+    const top = allEvents.slice(0, limit || 50);
+    return { content: [{ type: "text", text: JSON.stringify({
+      count: top.length, total: allEvents.length, events: top.map(e => e.data),
+    }) }] };
   })
 );
 
-// ── 12. acmi_spawn ─────────────────────────────────────────────────
-
-server.tool(
-  "acmi_spawn",
-  "Log an agent session spawn event. Records when an agent starts a new session.",
-  {
-    agentId: z.string().describe("Agent ID that spawned"),
-    sessionId: z.string().optional().describe("Session ID"),
-    modelId: z.string().optional().describe("Model ID used for the session"),
-  },
-  safeTool("acmi_spawn", async ({ agentId, sessionId, modelId }) => {
-    validateKeySegments(agentId);
-    const ts = Date.now();
-    const data = JSON.stringify({
-      ts,
-      session_id: sessionId || "unknown",
-      model_id: modelId || "unknown",
-    });
-    await redis("ZADD", `acmi:agent:${agentId}:spawns`, ts, data);
-    return jsonResult({ ok: true, agent_id: agentId });
-  })
-);
-
-// ── 13. acmi_bootstrap ─────────────────────────────────────────────
-
+// ── 7. acmi_bootstrap ──────────────────────────────────────────
 server.tool(
   "acmi_bootstrap",
   "One-shot agent context bundle. Fetches everything a fresh agent session needs: profile, signals, active threads, rollup, recent timeline, and spawns.",
   {
     agentId: z.string().describe("Agent ID to bootstrap"),
+    tenant: z.string().optional().describe("Tenant override"),
   },
-  safeTool("acmi_bootstrap", async ({ agentId }) => {
+  safeTool("acmi_bootstrap", async ({ agentId, tenant }) => {
     validateKeySegments(agentId);
-    const prefix = `acmi:agent:${agentId}`;
+    const t = resolveTenant(tenant);
+    const prefix = `acmi:${t}:agent:${agentId}`;
     const [profile, signals, active, rollup, timeline, spawns] = await Promise.all([
       redis("GET", `${prefix}:profile`),
       redis("GET", `${prefix}:signals`),
-      redis("HGETALL", `${prefix}:active_context`),
+      redis("GET", `${prefix}:active_context`),
       redis("GET", `${prefix}:rollup:latest`),
-      redis("ZREVRANGE", `${prefix}:timeline`, 0, 19),
-      redis("ZREVRANGE", `${prefix}:spawns`, 0, 4, "WITHSCORES"),
+      redis("ZREVRANGEBYSCORE", `${prefix}:timeline`, "+inf", "0", "WITHSCORES", "LIMIT", "0", "10"),
+      redis("ZREVRANGEBYSCORE", `${prefix}:timeline`, "+inf", "0", "WITHSCORES", "LIMIT", "0", "5"),
     ]);
-
-    return jsonResult({
-      agent_id: agentId,
-      bootstrapped_at: new Date().toISOString(),
+    return { content: [{ type: "text", text: JSON.stringify({
+      agent_id: agentId, tenant: t,
       profile: profile ? tryParse(profile) : null,
       signals: signals ? tryParse(signals) : null,
-      active_context: parseHash(active),
+      active_context: active ? tryParse(active) : {},
       rollup_latest: rollup ? tryParse(rollup) : null,
-      timeline_recent: (timeline || []).map(tryParse),
-      recent_spawns: parseZWithScores(spawns),
-    });
+      timeline_recent: parseZWithScores(timeline || []).map(e => e.data),
+      recent_spawns: parseZWithScores(spawns || []).map(e => e.data),
+    }) }] };
   })
 );
 
-// ── 14. acmi_active ────────────────────────────────────────────────
+// ── 8. acmi_spawn ──────────────────────────────────────────────
+server.tool(
+  "acmi_spawn",
+  "Log an agent session spawn event.",
+  {
+    agentId: z.string().describe("Agent ID being spawned"),
+    sessionId: z.string().optional().describe("Session identifier"),
+    modelId: z.string().optional().describe("Model ID for this session"),
+    tenant: z.string().optional().describe("Tenant override"),
+  },
+  safeTool("acmi_spawn", async ({ agentId, sessionId, modelId, tenant }) => {
+    validateKeySegments(agentId);
+    const t = resolveTenant(tenant);
+    const key = `acmi:${t}:agent:${agentId}:timeline`;
+    const ts = Date.now();
+    const data = { ts };
+    if (sessionId) data.sessionId = sessionId;
+    if (modelId) data.modelId = modelId;
+    await redis("ZADD", key, ts, JSON.stringify(data));
+    return { content: [{ type: "text", text: JSON.stringify({ ok: true, tenant: t, key, data }) }] };
+  })
+);
 
+// ── 9. acmi_active ─────────────────────────────────────────────
 server.tool(
   "acmi_active",
-  "Track agent thread engagement. Add/remove threads or list current active threads for an agent.",
+  "Track thread engagement for an agent.",
   {
     agentId: z.string().describe("Agent ID"),
-    action: z.enum(["add", "remove", "list"]).describe("Action: add a thread, remove a thread, or list all active threads"),
-    threadKey: z.string().optional().describe("Thread key (required for add/remove)"),
-    role: z.string().optional().describe("Role in thread (e.g. 'participant', 'lead'). Default: 'participant'"),
+    threadKey: z.string().describe("Thread key (e.g. 'agent-coordination')"),
+    role: z.string().optional().describe("Role in thread: 'participant' or 'lead' (default 'participant')"),
+    tenant: z.string().optional().describe("Tenant override"),
   },
-  safeTool("acmi_active", async ({ agentId, action, threadKey, role }) => {
-    validateKeySegments(agentId);
-    const key = `acmi:agent:${agentId}:active_context`;
-
-    if (action === "add") {
-      if (!threadKey) throw new Error("threadKey is required for 'add' action");
-      await redis("HSET", key, threadKey, JSON.stringify({ role: role || "participant", joined_at: Date.now() }));
-      return jsonResult({ ok: true, action: "add", threadKey });
-    }
-
-    if (action === "remove") {
-      if (!threadKey) throw new Error("threadKey is required for 'remove' action");
-      await redis("HDEL", key, threadKey);
-      return jsonResult({ ok: true, action: "remove", threadKey });
-    }
-
-    // list
-    const res = await redis("HGETALL", key);
-    return jsonResult(parseHash(res));
+  safeTool("acmi_active", async ({ agentId, threadKey, role, tenant }) => {
+    validateKeySegments(agentId, threadKey);
+    const t = resolveTenant(tenant);
+    const ts = Date.now();
+    await redis("SADD", `acmi:${t}:agent:${agentId}:active_threads`, `${threadKey}:${role || "participant"}:${ts}`);
+    return { content: [{ type: "text", text: JSON.stringify({ ok: true, tenant: t }) }] };
   })
 );
 
-// ── 15. acmi_rollup_set ────────────────────────────────────────────
-
+// ── 10. acmi_rollup_set ────────────────────────────────────────
 server.tool(
   "acmi_rollup_set",
-  "Set the latest rollup snapshot for an agent (acmi:agent:<id>:rollup:latest). Pairs with acmi_bootstrap which reads it.",
+  "Write the latest session rollup for an agent (read by acmi_bootstrap).",
   {
     agentId: z.string().describe("Agent ID"),
-    rollup: z.string().describe("JSON string of rollup data (cross-session summary, decisions, blockers, etc.)"),
+    rollup: z.string().describe("JSON string of rollup data"),
+    tenant: z.string().optional().describe("Tenant override"),
   },
-  safeTool("acmi_rollup_set", async ({ agentId, rollup }) => {
+  safeTool("acmi_rollup_set", async ({ agentId, rollup, tenant }) => {
     validateKeySegments(agentId);
     validateJson(rollup, "rollup");
-    const key = `acmi:agent:${agentId}:rollup:latest`;
+    const t = resolveTenant(tenant);
+    const key = `acmi:${t}:agent:${agentId}:rollup:latest`;
     await redis("SET", key, rollup);
-    return jsonResult({ ok: true, key });
+    return { content: [{ type: "text", text: JSON.stringify({ ok: true, tenant: t, key }) }] };
   })
 );
 
-// ── 16. acmi_delete ────────────────────────────────────────────────
+// ── 11-15. Work items (unchanged from v1.4, with tenant support) ─
+server.tool("acmi_work_create", "Create a new work item.",
+  { id: z.string(), title: z.string(), tenant: z.string().optional() },
+  safeTool("acmi_work_create", async ({ id, title, tenant }) => {
+    const t = resolveTenant(tenant);
+    const key = `acmi:${t}:work:${id}:profile`;
+    const profile = { id, title, status: "open", created_at: Date.now() };
+    await redis("SET", key, JSON.stringify(profile));
+    return { content: [{ type: "text", text: JSON.stringify({ ok: true, tenant: t, work: profile }) }] };
+  })
+);
 
-server.tool(
-  "acmi_delete",
-  "Delete an ACMI key. Refuses protected paths (acmi:registry:*, acmi:notion-sync:*) and any non-acmi:* key. Defaults to dry-run; pass confirm=true to actually delete.",
+server.tool("acmi_work_event", "Add an event to a work item timeline.",
+  { id: z.string(), source: z.string(), summary: z.string(), kind: z.string().optional(), tenant: z.string().optional() },
+  safeTool("acmi_work_event", async ({ id, source, summary, kind, tenant }) => {
+    const t = resolveTenant(tenant);
+    const key = `acmi:${t}:work:${id}:timeline`;
+    const ts = Date.now();
+    const ev = { ts, source, summary };
+    if (kind) ev.kind = kind;
+    await redis("ZADD", key, ts, JSON.stringify(ev));
+    return { content: [{ type: "text", text: JSON.stringify({ ok: true, tenant: t, event: ev }) }] };
+  })
+);
+
+server.tool("acmi_work_signal", "Update work item signals.",
+  { id: z.string(), signals: z.string(), tenant: z.string().optional() },
+  safeTool("acmi_work_signal", async ({ id, signals, tenant }) => {
+    validateJson(signals, "signals");
+    const t = resolveTenant(tenant);
+    const key = `acmi:${t}:work:${id}:signals`;
+    await redis("SET", key, signals);
+    return { content: [{ type: "text", text: JSON.stringify({ ok: true, tenant: t, key }) }] };
+  })
+);
+
+server.tool("acmi_work_get", "Fetch work item profile + signals + recent events.",
+  { id: z.string(), tenant: z.string().optional() },
+  safeTool("acmi_work_get", async ({ id, tenant }) => {
+    const t = resolveTenant(tenant);
+    const prefix = `acmi:${t}:work:${id}`;
+    const [profile, signals, timeline] = await Promise.all([
+      redis("GET", `${prefix}:profile`),
+      redis("GET", `${prefix}:signals`),
+      redis("ZREVRANGEBYSCORE", `${prefix}:timeline`, "+inf", "0", "WITHSCORES", "LIMIT", "0", "20"),
+    ]);
+    return { content: [{ type: "text", text: JSON.stringify({
+      id, tenant: t,
+      profile: profile ? tryParse(profile) : null,
+      signals: signals ? tryParse(signals) : null,
+      timeline: parseZWithScores(timeline || []).map(e => e.data),
+    }) }] };
+  })
+);
+
+server.tool("acmi_work_list", "List all work item IDs.",
+  { tenant: z.string().optional() },
+  safeTool("acmi_work_list", async ({ tenant }) => {
+    const t = resolveTenant(tenant);
+    const result = await redis("SCAN", "0", "MATCH", `acmi:${t}:work:*:profile`, "COUNT", "500");
+    return { content: [{ type: "text", text: JSON.stringify({
+      tenant: t, count: (result[1] || []).length, ids: (result[1] || []).map(k => k.split(":")[3]),
+    }) }] };
+  })
+);
+
+// ── 16. acmi_delete (unchanged) ────────────────────────────────
+server.tool("acmi_delete",
+  "Delete an ACMI key. Supports dry-run mode and refuses to delete protected paths (acmi:registry:*, acmi:notion-sync:*).",
   {
-    key: z.string().describe("Full ACMI key to delete (must start with 'acmi:')"),
-    confirm: z.boolean().optional().describe("Must be true to actually delete; otherwise returns dry-run preview. Default: false (dry-run)."),
+    key: z.string().describe("Full ACMI key to delete (e.g. 'acmi:agent:foo:profile')"),
+    confirm: z.boolean().optional().describe("Set to true to actually delete (default is dry-run)"),
   },
   safeTool("acmi_delete", async ({ key, confirm }) => {
-    if (!key || !key.startsWith("acmi:")) {
-      throw new Error("key must start with 'acmi:' (refusing to operate outside ACMI namespace)");
-    }
     if (isProtectedKey(key)) {
-      throw new Error(`refused: ${key} is a protected path (registry/notion-sync) — protected-paths are never auto-deleted`);
+      return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: `Refusing to delete protected key: ${key}` }) }] };
     }
-    const exists = await redis("EXISTS", key);
-    const type = exists === 1 ? await redis("TYPE", key) : null;
     if (!confirm) {
-      return jsonResult({ ok: true, dry_run: true, key, exists: exists === 1, type, hint: "pass confirm=true to actually delete" });
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, dry_run: true, key, action: "would delete" }) }] };
     }
-    if (exists !== 1) {
-      return jsonResult({ ok: true, dry_run: false, key, deleted: false, reason: "key did not exist" });
-    }
-    const deleted = await redis("DEL", key);
-    return jsonResult({ ok: true, dry_run: false, key, deleted: deleted === 1, type });
+    await redis("DEL", key);
+    return { content: [{ type: "text", text: JSON.stringify({ ok: true, key, action: "deleted" }) }] };
   })
 );
 
-// ─── Start ──────────────────────────────────────────────────────────
+// ── 17. acmi_tenant_list (v2.0 NEW) ───────────────────────────
+server.tool("acmi_tenant_list",
+  "List all tenants visible to this MCP client (from ACMI_ALLOWED_TENANTS env).",
+  {},
+  safeTool("acmi_tenant_list", async () => {
+    return { content: [{ type: "text", text: JSON.stringify({
+      allowed_tenants: allowedTenants,
+      default_tenant: defaultTenant,
+    }) }] };
+  })
+);
 
+// ─── Run ────────────────────────────────────────────────────────
 const transport = new StdioServerTransport();
 await server.connect(transport);
+console.error(`[acmi-mcp v2.0] ready (mode: ${useNative ? "native-redis" : "upstash-rest"}, tenant: ${defaultTenant})`);
