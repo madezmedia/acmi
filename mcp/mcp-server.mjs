@@ -4,16 +4,25 @@
  * ACMI MCP Server v2.0 — Model Context Protocol interface
  * Agentic Context Management Infrastructure
  *
- * v2.0 (2026-06-24):
+ * v2.0.1 (2026-07-22):
+ *   - DEGRADED MODE: when no Redis backend is reachable, falls back to
+ *     in-memory store + optional local ledger file instead of hard exit.
+ *   - New tool: acmi_mcp_status — reports connection mode, tenant, degraded state.
+ *   - Every tool response includes `degraded: true` + `mode: "in-memory"` when
+ *     operating in degraded mode.
+ *   - ACMI_LOCAL_LEDGER env var: if set, all write operations are logged to
+ *     <path>/ledger.jsonl for later replay.
+ *   - No more process.exit(1) when all backends unreachable.
  * - Native Redis support (node-redis) in addition to Upstash REST
  * - Tenant prefix support: acmi:<tenant>:<namespace>:<id>:*
  * - Multi-tenant validation (read/write namespaces per actor)
  * - Backward compatible with v1.x clients
  * - NEW tool: acmi_tenant_list
  *
- * Connection selection:
- *   - If ACMI_REDIS_HOST set → use native Redis
- *   - If UPSTASH_REDIS_REST_URL set → use Upstash REST (v1.x compat)
+ * Connection selection (priority):
+ *   1. ACMI_REDIS_HOST → native Redis (TCP)
+ *   2. ACMI_BRIDGE_URL → VM HTTP bridge (fleet PRIMARY for remote/edge)
+ *   3. UPSTASH_REDIS_REST_URL → Upstash REST (secondary / rate-limited)
  *
  * Tenant selection:
  *   - ACMI_DEFAULT_TENANT=madez (default)
@@ -25,8 +34,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { validateKeySegments, validateJson, isProtectedKey } from "./mcp-server-helpers.mjs";
+import { mkdirSync, writeFileSync } from "fs";
 
-// ─── Connection layer (v2.0) ─────────────────────────────────────
+// ─── Connection layer (v2.0 + bridge) ────────────────────────────
 
 const upstashUrl = process.env.UPSTASH_REDIS_REST_URL;
 const upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -34,15 +44,23 @@ const nativeHost = process.env.ACMI_REDIS_HOST;
 const nativePort = parseInt(process.env.ACMI_REDIS_PORT || "6379");
 const nativePassword = process.env.ACMI_REDIS_PASSWORD;
 const nativeDb = parseInt(process.env.ACMI_REDIS_DB || "0");
+// Fleet PRIMARY for agents that cannot open TCP:6379/26379 (edge, cloud sandboxes)
+const bridgeUrl = process.env.ACMI_BRIDGE_URL || process.env.ACMI_REDIS_BRIDGE_URL;
+const bridgeToken = process.env.ACMI_BRIDGE_TOKEN || process.env.ACMI_REDIS_BRIDGE_TOKEN || "vm-local-bridge";
 
 const defaultTenant = process.env.ACMI_DEFAULT_TENANT || "madez";
 const allowedTenants = (process.env.ACMI_ALLOWED_TENANTS || "madez").split(",");
+const localLedgerPath = process.env.ACMI_LOCAL_LEDGER || "";
 
 let nativeClient = null;
 let useNative = false;
+let useBridge = false;
+let useMemory = false;
+global.__acmi_start = Date.now();
+
 
 if (nativeHost) {
-  // Native Redis mode (v2.0 new)
+  // Native Redis mode (v2.0)
   try {
     const { createClient } = await import("redis");
     nativeClient = createClient({
@@ -55,28 +73,328 @@ if (nativeHost) {
     console.error(`[acmi-mcp v2.0] connected to native Redis at ${nativeHost}:${nativePort}`);
   } catch (e) {
     console.error(`[acmi-mcp v2.0] native Redis connection failed: ${e.message}`);
-    if (!upstashUrl) process.exit(1);
     useNative = false;
   }
 }
 
-if (!useNative && (!upstashUrl || !upstashToken)) {
-  console.error("ERROR: Need either ACMI_REDIS_HOST (native) or UPSTASH_REDIS_REST_URL+TOKEN");
-  process.exit(1);
+if (!useNative && bridgeUrl) {
+  useBridge = true;
+  console.error(`[acmi-mcp v2.0] using VM HTTP bridge at ${bridgeUrl.replace(/\/$/, "")}`);
 }
 
-if (!useNative) {
-  console.error(`[acmi-mcp v2.0] using Upstash REST (v1.x compat mode)`);
+if (!useNative && !useBridge) {
+  if (upstashUrl && upstashToken) {
+    console.error(`[acmi-mcp v2.0] using Upstash REST (v1.x compat / secondary)`);
+  } else {
+    console.error(`[acmi-mcp v2.0] WARNING: no Redis backend reachable — entering DEGRADED MODE (in-memory store)`);
+    if (localLedgerPath) {
+      try { mkdirSync(localLedgerPath, { recursive: true }); } catch {}
+      console.error(`[acmi-mcp v2.0] local ledger: ${localLedgerPath}`);
+    }
+    useMemory = true;
+  }
+}
+
+// ─── In-memory degraded store (when no Redis backend reachable) ───
+
+const __mem = new Map();
+
+function memWriteLedger(kind, key, detail) {
+  if (!localLedgerPath) return;
+  try {
+    const entry = { ts: Date.now(), kind, key, detail, mode: "degraded" };
+    writeFileSync(`${localLedgerPath}/ledger.jsonl`, JSON.stringify(entry) + "\n", { flag: "a" });
+  } catch {}
+}
+
+function memGet(key) {
+  const v = __mem.get(key);
+  return v !== undefined ? v : null;
+}
+
+function memSet(key, value) {
+  __mem.set(key, value);
+  return "OK";
+}
+
+function memDel(...keys) {
+  let c = 0;
+  for (const k of keys) if (__mem.delete(k)) c++;
+  return c >>> 0;
+}
+
+function memExists(key) {
+  return __mem.has(key) ? 1 : 0;
+}
+
+function memType(key) {
+  const v = __mem.get(key);
+  if (v === undefined) return "none";
+  if (Array.isArray(v)) return "list";
+  if (typeof v === "object") return "hash";
+  return "string";
+}
+
+function memScan(args) {
+  let cursor = parseInt(args[0] || "0");
+  const matchIdx = args.indexOf("MATCH");
+  const countIdx = args.indexOf("COUNT");
+  const pattern = matchIdx >= 0 ? args[matchIdx + 1] : "*";
+  const count = countIdx >= 0 ? parseInt(args[countIdx + 1]) : 100;
+  const allKeys = [...__mem.keys()].filter(k => {
+    try { return new RegExp("^" + pattern.replace(/\*/g, ".*").replace(/\?/g, ".") + "$").test(k); } catch { return false; }
+  });
+  const page = allKeys.slice(cursor, cursor + count);
+  const nextCursor = cursor + count >= allKeys.length ? "0" : String(cursor + count);
+  return [nextCursor, page];
+}
+
+function memHGet(key, field) {
+  const h = __mem.get(key);
+  if (!h || typeof h !== "object") return null;
+  const v = h[field];
+  return v !== undefined ? String(v) : null;
+}
+
+function memHSet(key, ...args) {
+  let h = __mem.get(key);
+  if (!h || typeof h !== "object") { h = {}; __mem.set(key, h); }
+  let c = 0;
+  if (args.length === 2) { h[args[0]] = args[1]; c = 1; }
+  else { for (let i = 0; i + 1 < args.length; i += 2) { h[args[i]] = args[i + 1]; c++; } }
+  return c;
+}
+
+function memHGetAll(key) {
+  const h = __mem.get(key);
+  if (!h || typeof h !== "object") return [];
+  const r = [];
+  for (const [k, v] of Object.entries(h)) r.push(k, String(v));
+  return r;
+}
+
+function memHDel(key, ...fields) {
+  const h = __mem.get(key);
+  if (!h || typeof h !== "object") return 0;
+  let c = 0;
+  for (const f of fields) if (delete h[f]) c++;
+  return c;
+}
+
+// ZADD key score member [score member ...]
+function memZAdd(key, ...args) {
+  let z = __mem.get(key);
+  if (!z || !Array.isArray(z)) { z = []; __mem.set(key, z); }
+  let c = 0;
+  for (let i = 0; i + 1 < args.length; i += 2) {
+    const score = parseFloat(args[i]);
+    const member = String(args[i + 1]);
+    const idx = z.findIndex(e => e.m === member);
+    if (idx >= 0) { z[idx].s = score; c++; }
+    else { z.push({ s: score, m: member }); c++; }
+  }
+  return c;
+}
+
+function memParseScore(s) {
+  if (s === "+inf" || s === "+inf" || s === Infinity) return Infinity;
+  if (s === "-inf" || s === "-inf" || s === -Infinity) return -Infinity;
+  return parseFloat(s);
+}
+
+function memZRangeByScoreGeneric(key, min, max, reverse, withScores, limit, offset) {
+  const z = __mem.get(key);
+  if (!z || !Array.isArray(z)) return [];
+  const lo = memParseScore(min);
+  const hi = memParseScore(max);
+  let entries = z.filter(e => e.s >= lo && e.s <= hi);
+  if (reverse) entries.reverse();
+  if (withScores) {
+    const r = [];
+    for (const e of entries) { r.push(e.m, String(e.s)); }
+    return r;
+  }
+  return entries.map(e => e.m);
+}
+
+function memZRevRangeByScore(key, ...args) {
+  const max = args[0] || "+inf";
+  const min = args[1] || "0";
+  const withScores = args.indexOf("WITHSCORES") >= 0;
+  const limitIdx = args.indexOf("LIMIT");
+  let limOffset = 0, limCount = Infinity;
+  if (limitIdx >= 0 && limitIdx + 2 < args.length) {
+    limOffset = parseInt(args[limitIdx + 1]) || 0;
+    limCount = parseInt(args[limitIdx + 2]) || Infinity;
+  }
+  const all = memZRangeByScoreGeneric(key, min, max, true, withScores);
+  if (limCount === Infinity) return all;
+  return all.slice(limOffset * 2, (limOffset + limCount) * 2);
+}
+
+function memZRem(key, ...members) {
+  const z = __mem.get(key);
+  if (!z || !Array.isArray(z)) return 0;
+  const before = z.length;
+  __mem.set(key, z.filter(e => !members.includes(e.m)));
+  return before - z.length;
+}
+
+function memZCard(key) {
+  const z = __mem.get(key);
+  return z && Array.isArray(z) ? z.length : 0;
+}
+
+function memZScore(key, member) {
+  const z = __mem.get(key);
+  if (!z || !Array.isArray(z)) return null;
+  const e = z.find(e => e.m === member);
+  return e ? String(e.s) : null;
+}
+
+function memLPush(key, ...values) {
+  let l = __mem.get(key);
+  if (!l || !Array.isArray(l)) { l = []; __mem.set(key, l); }
+  l.unshift(...values);
+  return l.length;
+}
+
+function memRPush(key, ...values) {
+  let l = __mem.get(key);
+  if (!l || !Array.isArray(l)) { l = []; __mem.set(key, l); }
+  l.push(...values);
+  return l.length;
+}
+
+function memLRange(key, start, stop) {
+  const l = __mem.get(key);
+  if (!l || !Array.isArray(l)) return [];
+  return l.slice(start, stop + 1);
+}
+
+function memSAdd(key, ...members) {
+  let s = __mem.get(key);
+  if (!s || !Array.isArray(s)) { s = []; __mem.set(key, s); }
+  let c = 0;
+  for (const m of members) { if (!s.includes(m)) { s.push(m); c++; } }
+  return c;
+}
+
+function memSMembers(key) {
+  const s = __mem.get(key);
+  return s && Array.isArray(s) ? [...s] : [];
+}
+
+function memSRem(key, ...members) {
+  const s = __mem.get(key);
+  if (!s || !Array.isArray(s)) return 0;
+  const before = s.length;
+  __mem.set(key, s.filter(m => !members.includes(m)));
+  return before - s.length;
+}
+
+function memKeys(pattern) {
+  const regex = new RegExp("^" + pattern.replace(/\*/g, ".*").replace(/\?/g, ".") + "$");
+  return [...__mem.keys()].filter(k => regex.test(k));
+}
+
+function memDbSize() { return __mem.size; }
+
+function memFlushDb() { __mem.clear(); return "OK"; }
+
+function memFlushAll() { __mem.clear(); return "OK"; }
+
+function memExpire() { return 1; }
+
+function memTtl() { return -1; }
+
+function memIncr(key) {
+  const v = parseInt(__mem.get(key) || "0");
+  __mem.set(key, String(v + 1));
+  return v + 1;
+}
+
+function memDecr(key) {
+  const v = parseInt(__mem.get(key) || "0");
+  __mem.set(key, String(v - 1));
+  return v - 1;
+}
+
+async function memRedisCommand(command, ...args) {
+  const cmd = command.toUpperCase();
+  switch (cmd) {
+    case "GET": return memGet(args[0]);
+    case "SET": return memSet(args[0], args[1]);
+    case "DEL": return memDel(...args);
+    case "EXISTS": return memExists(args[0]);
+    case "TYPE": return memType(args[0]);
+    case "SCAN": return memScan(args);
+    case "HGET": return memHGet(args[0], args[1]);
+    case "HSET": return memHSet(args[0], ...args.slice(1));
+    case "HGETALL": return memHGetAll(args[0]);
+    case "HDEL": return memHDel(args[0], ...args.slice(1));
+    case "ZADD": return memZAdd(args[0], ...args.slice(1));
+    case "ZREVRANGEBYSCORE": return memZRevRangeByScore(args[0], ...args.slice(1));
+    case "ZRANGEBYSCORE": return memZRangeByScoreGeneric(args[0], args[1], args[2], false, args.indexOf("WITHSCORES") >= 0);
+    case "ZRANGE": return memZRangeByScoreGeneric(args[0], args[1], args[2], false, args[3]?.toUpperCase() === "WITHSCORES");
+    case "ZREVRANGE": return memZRangeByScoreGeneric(args[0], args[1], args[2], true, args[3]?.toUpperCase() === "WITHSCORES");
+    case "ZRANGEBYSCORE": return memZRangeByScoreGeneric(args[0], args[1], args[2], false, args.indexOf("WITHSCORES") >= 0);
+    case "ZREM": return memZRem(args[0], ...args.slice(1));
+    case "ZCARD": return memZCard(args[0]);
+    case "ZSCORE": return memZScore(args[0], args[1]);
+    case "LPUSH": return memLPush(args[0], ...args.slice(1));
+    case "RPUSH": return memRPush(args[0], ...args.slice(1));
+    case "LRANGE": return memLRange(args[0], parseInt(args[1]), parseInt(args[2]));
+    case "SADD": return memSAdd(args[0], ...args.slice(1));
+    case "SMEMBERS": return memSMembers(args[0]);
+    case "SREM": return memSRem(args[0], ...args.slice(1));
+    case "DBSIZE": return memDbSize();
+    case "PING": return "PONG";
+    case "KEYS": return memKeys(args[0]);
+    case "FLUSHDB": return memFlushDb();
+    case "FLUSHALL": return memFlushAll();
+    case "EXPIRE": return memExpire();
+    case "TTL": return memTtl();
+    case "INCR": return memIncr(args[0]);
+    case "DECR": return memDecr(args[0]);
+    default:
+      if (__mem.has("__debug")) console.error(`[mem] unhandled: ${cmd}`, args);
+      throw new Error(`in-memory: unhandled command ${cmd}`);
+  }
 }
 
 // ─── Redis abstraction ───────────────────────────────────────────
 
 async function redis(command, ...args) {
-  if (useNative) {
+  if (useMemory) {
+    const result = await memRedisCommand(command, ...args);
+    if (["SET","HSET","ZADD","LPUSH","RPUSH","DEL","HDEL","ZREM","SREM","SADD","FLUSHDB","FLUSHALL"].includes(command.toUpperCase())) {
+      memWriteLedger(command, args[0], { args, result });
+    }
+    return result;
+  } else if (useNative) {
     return await nativeRedisCommand(nativeClient, command, ...args);
+  } else if (useBridge) {
+    return await redisCommandBridge(bridgeUrl, bridgeToken, command, ...args);
   } else {
     return await upstashRedisCommand(upstashUrl, upstashToken, command, ...args);
   }
+}
+
+/** VM bridge: POST JSON command array → { result } or { error } */
+async function redisCommandBridge(url, token, command, ...args) {
+  const endpoint = url.endsWith("/") ? url : `${url}/`;
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify([command, ...args]),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(`Bridge: ${data.error}`);
+  return data.result;
 }
 
 async function upstashRedisCommand(url, token, command, ...args) {
@@ -291,13 +609,20 @@ function parseSince(s) {
  */
 function safeTool(name, fn) {
   return async (args) => {
-    try { return await fn(args); } catch (e) { return { content: [{ type: "text", text: JSON.stringify({ ok: false, tool: name, error: String(e?.message || e) }) }] }; }
+    try {
+      const result = await fn(args);
+      const parsed = typeof result.content?.[0]?.text === "string" ? JSON.parse(result.content[0].text) : result;
+      if (useMemory && parsed && typeof parsed === "object") parsed.degraded = true;
+      if (useMemory && parsed && typeof parsed === "object") parsed.mode = "in-memory";
+      const text = JSON.stringify(parsed);
+      return { content: [{ type: "text", text }] };
+    } catch (e) { return { content: [{ type: "text", text: JSON.stringify({ ok: false, tool: name, error: String(e?.message || e), degraded: useMemory }) }] }; }
   };
 }
 
 // ─── The MCP server (v1.4 logic, v2.0 tenant-aware) ─────────────
 
-const server = new McpServer({ name: "acmi-mcp", version: "2.0.0" });
+const server = new McpServer({ name: "acmi-mcp", version: "2.0.1" });
 
 // ── 1. acmi_profile ─────────────────────────────────────────────
 server.tool(
@@ -629,7 +954,25 @@ server.tool("acmi_delete",
   })
 );
 
-// ── 17. acmi_tenant_list (v2.0 NEW) ───────────────────────────
+// ── 17. acmi_mcp_status ───────────────────────────────────────
+server.tool(
+  "acmi_mcp_status",
+  "Report ACMI MCP server status: connection mode, tenant, degraded state.",
+  {},
+  safeTool("acmi_mcp_status", async () => {
+    return { content: [{ type: "text", text: JSON.stringify({
+      version: "2.0.1",
+      mode: useNative ? "native-redis" : useBridge ? "vm-http-bridge" : useMemory ? "degraded-in-memory" : "upstash-rest",
+      degraded: useMemory,
+      tenant: defaultTenant,
+      allowed_tenants: allowedTenants,
+      local_ledger: localLedgerPath || null,
+      uptime_ms: Date.now() - (global.__acmi_start || Date.now()),
+    }) }] };
+  })
+);
+
+// ── 18. acmi_tenant_list (v2.0 NEW) ───────────────────────────
 server.tool("acmi_tenant_list",
   "List all tenants visible to this MCP client (from ACMI_ALLOWED_TENANTS env).",
   {},
@@ -644,4 +987,5 @@ server.tool("acmi_tenant_list",
 // ─── Run ────────────────────────────────────────────────────────
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`[acmi-mcp v2.0] ready (mode: ${useNative ? "native-redis" : "upstash-rest"}, tenant: ${defaultTenant})`);
+const modeLabel = useNative ? "native-redis" : useBridge ? "vm-http-bridge" : useMemory ? "degraded-in-memory" : "upstash-rest";
+console.error(`[acmi-mcp v2.0] ready (mode: ${modeLabel}, tenant: ${defaultTenant})`);
