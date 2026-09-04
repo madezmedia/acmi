@@ -33,7 +33,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { validateKeySegments, validateJson, isProtectedKey } from "./mcp-server-helpers.mjs";
+import { validateKeySegments, validateJson, isProtectedKey, isBridgeUrl, restEndpoint } from "./mcp-server-helpers.mjs";
 import { mkdirSync, writeFileSync } from "fs";
 
 // ─── Connection layer (v2.0 + bridge) ────────────────────────────
@@ -44,9 +44,10 @@ const nativeHost = process.env.ACMI_REDIS_HOST;
 const nativePort = parseInt(process.env.ACMI_REDIS_PORT || "6379");
 const nativePassword = process.env.ACMI_REDIS_PASSWORD;
 const nativeDb = parseInt(process.env.ACMI_REDIS_DB || "0");
-// Fleet PRIMARY for agents that cannot open TCP:6379/26379 (edge, cloud sandboxes)
-const bridgeUrl = process.env.ACMI_BRIDGE_URL || process.env.ACMI_REDIS_BRIDGE_URL;
-const bridgeToken = process.env.ACMI_BRIDGE_TOKEN || process.env.ACMI_REDIS_BRIDGE_TOKEN || "vm-local-bridge";
+// Fleet PRIMARY for agents that cannot open TCP:6379/26379 (edge, cloud sandboxes).
+// Polar exec URLs stuffed into UPSTASH_* also count as bridge (no trailing slash).
+const bridgeUrl = process.env.ACMI_BRIDGE_URL || process.env.ACMI_REDIS_BRIDGE_URL || (isBridgeUrl(upstashUrl) ? upstashUrl : "");
+const bridgeToken = process.env.ACMI_BRIDGE_TOKEN || process.env.ACMI_REDIS_BRIDGE_TOKEN || (isBridgeUrl(upstashUrl) ? upstashToken : "") || "vm-local-bridge";
 
 const defaultTenant = process.env.ACMI_DEFAULT_TENANT || "madez";
 const allowedTenants = (process.env.ACMI_ALLOWED_TENANTS || "madez").split(",");
@@ -79,7 +80,7 @@ if (nativeHost) {
 
 if (!useNative && bridgeUrl) {
   useBridge = true;
-  console.error(`[acmi-mcp v2.0] using VM HTTP bridge at ${bridgeUrl.replace(/\/$/, "")}`);
+  console.error(`[acmi-mcp v2.0] using VM HTTP bridge at ${restEndpoint(bridgeUrl)}`);
 }
 
 if (!useNative && !useBridge) {
@@ -383,7 +384,8 @@ async function redis(command, ...args) {
 
 /** VM bridge: POST JSON command array → { result } or { error } */
 async function redisCommandBridge(url, token, command, ...args) {
-  const endpoint = url.endsWith("/") ? url : `${url}/`;
+  // Polar/nginx ACMI bridge is /bridge/exec with no trailing slash (slash → 404).
+  const endpoint = restEndpoint(url);
   const res = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -398,7 +400,7 @@ async function redisCommandBridge(url, token, command, ...args) {
 }
 
 async function upstashRedisCommand(url, token, command, ...args) {
-  const endpoint = `${url.replace(/\/$/, "")}/`;
+  const endpoint = restEndpoint(url);
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -910,16 +912,21 @@ server.tool("acmi_work_get", "Fetch work item profile + signals + recent events.
   safeTool("acmi_work_get", async ({ id, tenant }) => {
     const t = resolveTenant(tenant);
     const prefix = `acmi:${t}:work:${id}`;
-    const [profile, signals, timeline] = await Promise.all([
+    const [signalsType, profileRaw, signalsRaw, timeline] = await Promise.all([
+      redis("TYPE", `${prefix}:signals`),
       redis("GET", `${prefix}:profile`),
-      redis("GET", `${prefix}:signals`),
+      redis(signalsType === "hash" ? "HGETALL" : "GET", `${prefix}:signals`),
       redis("ZREVRANGEBYSCORE", `${prefix}:timeline`, "+inf", "0", "WITHSCORES", "LIMIT", "0", "20"),
     ]);
+    const parsedSignals = signalsType === "hash"
+      ? parseHash(signalsRaw)
+      : (signalsRaw ? tryParse(signalsRaw) : null);
     return { content: [{ type: "text", text: JSON.stringify({
       id, tenant: t,
-      profile: profile ? tryParse(profile) : null,
-      signals: signals ? tryParse(signals) : null,
+      profile: profileRaw ? tryParse(profileRaw) : null,
+      signals: parsedSignals,
       timeline: parseZWithScores(timeline || []).map(e => e.data),
+      _signalsType: signalsType || null,
     }) }] };
   })
 );

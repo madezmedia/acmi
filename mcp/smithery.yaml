@@ -1,0 +1,39 @@
+# Stdio listing companion for @madezmedia/acmi-mcp
+# Hosted HTTP MCP lives at acmi-product.vercel.app/api/mcp
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      ACMI_BRIDGE_URL:
+        type: string
+        description: Polar HTTPS exec URL (canonical https://acmi-redis-u70402.vm.elestio.app/bridge/exec). No trailing slash.
+      ACMI_BRIDGE_TOKEN:
+        type: string
+        description: Polar exec token (canonical vm-local-bridge).
+        format: password
+      UPSTASH_REDIS_REST_URL:
+        type: string
+        description: Alias for ACMI_BRIDGE_URL, or an Upstash Cloud REST URL.
+      UPSTASH_REDIS_REST_TOKEN:
+        type: string
+        description: Alias for ACMI_BRIDGE_TOKEN, or an Upstash REST token.
+        format: password
+      ACMI_DEFAULT_TENANT:
+        type: string
+        description: Default tenant (madez).
+      ACMI_ALLOWED_TENANTS:
+        type: string
+        description: Comma-separated tenants.
+  commandFn: |-
+    (config) => ({
+      command: "acmi-mcp",
+      env: {
+        ACMI_BRIDGE_URL: config.ACMI_BRIDGE_URL || config.UPSTASH_REDIS_REST_URL || "",
+        ACMI_BRIDGE_TOKEN: config.ACMI_BRIDGE_TOKEN || config.UPSTASH_REDIS_REST_TOKEN || "",
+        UPSTASH_REDIS_REST_URL: config.UPSTASH_REDIS_REST_URL || "",
+        UPSTASH_REDIS_REST_TOKEN: config.UPSTASH_REDIS_REST_TOKEN || "",
+        ACMI_DEFAULT_TENANT: config.ACMI_DEFAULT_TENANT || "madez",
+        ACMI_ALLOWED_TENANTS: config.ACMI_ALLOWED_TENANTS || "madez"
+      }
+    })

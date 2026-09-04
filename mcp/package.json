@@ -1,8 +1,8 @@
 {
   "name": "@madezmedia/acmi-mcp",
   "mcpName": "io.github.madezmedia/acmi-mcp",
-  "version": "1.6.0",
-  "description": "MCP Server for ACMI v1.5 \u2014 Agentic Context Memory Interface with Fleet Comms Protocol. Multi-agent coordination, atomic commit protocol, real-time fleet events, and cross-session context on Upstash Redis.",
+  "version": "2.0.1",
+  "description": "MCP Server for ACMI v1.5 — Agentic Context Memory Interface. Polar HTTPS exec Redis (canonical) or Upstash REST. Fleet comms, atomic commit events, cross-session context.",
   "type": "module",
   "main": "mcp-server.mjs",
   "bin": {
@@ -11,6 +11,7 @@
   "files": [
     "mcp-server.mjs",
     "mcp-server-helpers.mjs",
+    "smithery.yaml",
     "README.md",
     "LICENSE"
   ],
@@ -46,6 +47,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "redis": "^6.1.0",
     "zod": "^3.24.0"
   },
   "publishConfig": {

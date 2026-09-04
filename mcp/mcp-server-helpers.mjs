@@ -49,3 +49,24 @@ export function isProtectedKey(key) {
   if (!key) return true;
   return PROTECTED_PREFIXES.some(p => key.startsWith(p));
 }
+
+/** Polar HTTPS exec is `/bridge/exec` with no trailing slash (slash → 404). */
+export function isBridgeUrl(url) {
+  return /\/bridge\/exec(?:\/|$|\?)/.test(String(url || ""));
+}
+
+/**
+ * POST target for HTTP Redis REST.
+ * Polar exec: strip slashes. Upstash Cloud: keep a trailing slash.
+ */
+export function restEndpoint(url) {
+  const stripped = String(url || "").replace(/\/+$/, "");
+  if (!stripped) return stripped;
+  if (isBridgeUrl(stripped)) return stripped;
+  try {
+    if (new URL(stripped).hostname.endsWith("upstash.io")) return `${stripped}/`;
+  } catch {
+    /* ignore */
+  }
+  return stripped;
+}

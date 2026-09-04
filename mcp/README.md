@@ -47,8 +47,8 @@ npx -y @madezmedia/acmi-mcp
 
 ## Quick start
 
-1. Create an Upstash Redis database and copy the REST URL + token.
-2. Add ACMI to your MCP host config.
+1. Point at Polar HTTPS exec (canonical) or an Upstash Cloud REST URL.
+2. Add ACMI to your MCP host config. Do not set `ACMI_REDIS_HOST`. Do not append a trailing slash to `/bridge/exec`.
 3. Bootstrap the agent or host session before acting.
 
 ### Claude Desktop example
@@ -60,8 +60,9 @@ npx -y @madezmedia/acmi-mcp
       "command": "npx",
       "args": ["-y", "@madezmedia/acmi-mcp"],
       "env": {
-        "UPSTASH_REDIS_REST_URL": "https://yourthing-12345.upstash.io",
-        "UPSTASH_REDIS_REST_TOKEN": "gQAAAAAAAZ..."
+        "ACMI_BRIDGE_URL": "https://acmi-redis-u70402.vm.elestio.app/bridge/exec",
+        "ACMI_BRIDGE_TOKEN": "vm-local-bridge",
+        "ACMI_DEFAULT_TENANT": "madez"
       }
     }
   }
