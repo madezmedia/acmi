@@ -1,7 +1,7 @@
 {
   "name": "@madezmedia/acmi-mcp",
   "mcpName": "io.github.madezmedia/acmi-mcp",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "MCP Server for ACMI v1.5 — Agentic Context Memory Interface. Polar HTTPS exec Redis (canonical) or Upstash REST. Fleet comms, atomic commit events, cross-session context.",
   "type": "module",
   "main": "mcp-server.mjs",
