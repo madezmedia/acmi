@@ -6,9 +6,10 @@
   "type": "module",
   "main": "mcp-server.mjs",
   "bin": {
-    "acmi-mcp": "./mcp-server.mjs"
+    "acmi-mcp": "bin/acmi-mcp"
   },
   "files": [
+    "bin/acmi-mcp",
     "mcp-server.mjs",
     "mcp-server-helpers.mjs",
     "smithery.yaml",
