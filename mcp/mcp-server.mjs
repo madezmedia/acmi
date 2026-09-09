@@ -677,9 +677,10 @@ server.tool(
     summary: z.string().describe("Human-readable event summary"),
     kind: z.string().optional().describe("Event kind (default: 'event')"),
     correlationId: z.string().optional().describe("Correlation ID for chain tracking"),
+    parentCorrelationId: z.string().optional().describe("Parent correlation ID for chain tracking"),
     tenant: z.string().optional().describe("Tenant override"),
   },
-  safeTool("acmi_event", async ({ namespace, id, source, summary, kind, correlationId, tenant }) => {
+  safeTool("acmi_event", async ({ namespace, id, source, summary, kind, correlationId, parentCorrelationId, tenant }) => {
     validateKeySegments(namespace, id);
     const t = resolveTenant(tenant);
     const key = keyProfile(t, namespace, id, "timeline");
@@ -687,6 +688,7 @@ server.tool(
     const event = { ts, source, summary };
     if (kind) event.kind = kind;
     if (correlationId) event.correlationId = correlationId;
+    if (parentCorrelationId) event.parentCorrelationId = parentCorrelationId;
     await redis("ZADD", key, ts, JSON.stringify(event));
     return { content: [{ type: "text", text: JSON.stringify({ ok: true, tenant: t, key, event }) }] };
   })
@@ -912,8 +914,8 @@ server.tool("acmi_work_get", "Fetch work item profile + signals + recent events.
   safeTool("acmi_work_get", async ({ id, tenant }) => {
     const t = resolveTenant(tenant);
     const prefix = `acmi:${t}:work:${id}`;
-    const [signalsType, profileRaw, signalsRaw, timeline] = await Promise.all([
-      redis("TYPE", `${prefix}:signals`),
+    const signalsType = await redis("TYPE", `${prefix}:signals`);
+    const [profileRaw, signalsRaw, timeline] = await Promise.all([
       redis("GET", `${prefix}:profile`),
       redis(signalsType === "hash" ? "HGETALL" : "GET", `${prefix}:signals`),
       redis("ZREVRANGEBYSCORE", `${prefix}:timeline`, "+inf", "0", "WITHSCORES", "LIMIT", "0", "20"),
