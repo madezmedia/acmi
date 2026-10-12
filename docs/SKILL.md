@@ -33,7 +33,32 @@ Because ACMI is namespace-driven, you can drop this exact same infrastructure in
 
 ## Installation
 
-1. Create a serverless Redis database on [Upstash](https://console.upstash.com/redis).
+## Fleet PRIMARY (self-hosted bridge) — 2026-07-17
+
+Prefer the VM HTTP bridge for Mad EZ fleet agents (edge / no TCP Redis):
+
+```bash
+export ACMI_BRIDGE_URL="http://152.53.201.27:8081/"
+export ACMI_BRIDGE_TOKEN="vm-local-bridge"
+# optional native TCP when available:
+# export ACMI_REDIS_HOST=152.53.201.27 ACMI_REDIS_PORT=26379 ACMI_REDIS_PASSWORD=...
+```
+
+```js
+import { BridgeAdapter, redisCommand } from "@madezmedia/acmi";
+// or: import { BridgeAdapter } from "@madezmedia/acmi/adapters/bridge";
+
+await redisCommand(["PING"]); // { result: "PONG" }
+const adapter = new BridgeAdapter();
+```
+
+MCP env priority: `ACMI_REDIS_HOST` → `ACMI_BRIDGE_URL` → `UPSTASH_*`.
+
+Verify: `bash ~/clawd/scripts/bridge-verify.sh`
+
+---
+
+1. Create a serverless Redis database on [Upstash](https://console.upstash.com/redis) (secondary / public installs only).
 2. Set your environment variables:
    ```bash
    export UPSTASH_REDIS_REST_URL="https://<your-endpoint>.upstash.io"

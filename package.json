@@ -1,7 +1,7 @@
 {
   "name": "@madezmedia/acmi",
   "version": "2.0.0",
-  "description": "ACMI \u2014 the protocol for agent memory. Three keys: Profile / Signals / Timeline.",
+  "description": "ACMI — the protocol for agent memory. Three keys: Profile / Signals / Timeline.",
   "keywords": [
     "ai",
     "agents",
@@ -49,6 +49,11 @@
       "types": "./dist/adapters/upstash.d.ts",
       "import": "./dist/adapters/upstash.js",
       "require": "./dist/adapters/upstash.cjs"
+    },
+    "./adapters/bridge": {
+      "types": "./dist/adapters/bridge.d.ts",
+      "import": "./dist/adapters/bridge.js",
+      "require": "./dist/adapters/bridge.cjs"
     },
     "./testing/conformance": {
       "types": "./dist/testing/conformance.d.ts",
@@ -106,5 +111,8 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
   }
 }

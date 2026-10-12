@@ -73,7 +73,7 @@ async function invite() {
     correlationId: 'agent-expansion-1777399140000',
     summary: `[onboarded v1.3] Agent '${id}' (${role}) initialized with ${tier} permissions.`
   };
-  await redis('ZADD', 'acmi:thread:agent-coordination:timeline', String(ts), JSON.stringify(event));
+  await redis('ZADD', 'acmi:madez:thread:agent-coordination:timeline', String(ts), JSON.stringify(event));
 
   console.log(`✅ Success: Agent ${id} is live with v1.3 RBAC.`);
 }
