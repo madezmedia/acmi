@@ -10,7 +10,7 @@ startCommand:
         description: Polar HTTPS exec URL (canonical https://acmi-redis-u70402.vm.elestio.app/bridge/exec). No trailing slash.
       ACMI_BRIDGE_TOKEN:
         type: string
-        description: Polar exec token (canonical vm-local-bridge).
+        description: Polar exec token. Never commit a real token to a public repository.
         format: password
       UPSTASH_REDIS_REST_URL:
         type: string

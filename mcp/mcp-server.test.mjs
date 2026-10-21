@@ -2,7 +2,7 @@
 // Run: node --test ~/.openclaw/skills/acmi/mcp-server.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateKeySegments, validateJson, isProtectedKey, isBridgeUrl, restEndpoint } from "./mcp-server-helpers.mjs";
+import { validateKeySegments, validateJson, isProtectedKey, isBridgeUrl, restEndpoint, resolveBridgeToken } from "./mcp-server-helpers.mjs";
 
 // ─── validateKeySegments ───────────────────────────────────────────
 
@@ -113,4 +113,38 @@ test("restEndpoint: Polar never keeps a trailing slash", () => {
 test("restEndpoint: Upstash Cloud keeps a trailing slash", () => {
   assert.equal(restEndpoint("https://loved-platypus-102968.upstash.io"), "https://loved-platypus-102968.upstash.io/");
   assert.equal(restEndpoint("https://loved-platypus-102968.upstash.io/"), "https://loved-platypus-102968.upstash.io/");
+});
+
+// ─── resolveBridgeToken ─────────────────────────────────────────────
+
+test("resolveBridgeToken: reads ACMI_BRIDGE_TOKEN", () => {
+  assert.equal(resolveBridgeToken({ ACMI_BRIDGE_TOKEN: "tok-a" }), "tok-a");
+});
+
+test("resolveBridgeToken: reads ACMI_REDIS_BRIDGE_TOKEN", () => {
+  assert.equal(resolveBridgeToken({ ACMI_REDIS_BRIDGE_TOKEN: "tok-b" }), "tok-b");
+});
+
+test("resolveBridgeToken: prefers ACMI_BRIDGE_TOKEN over the alias", () => {
+  assert.equal(resolveBridgeToken({ ACMI_BRIDGE_TOKEN: "tok-a", ACMI_REDIS_BRIDGE_TOKEN: "tok-b" }), "tok-a");
+});
+
+test("resolveBridgeToken: trims surrounding whitespace", () => {
+  assert.equal(resolveBridgeToken({ ACMI_BRIDGE_TOKEN: "  tok-a  " }), "tok-a");
+});
+
+test("resolveBridgeToken: returns empty when no token is configured", () => {
+  assert.equal(resolveBridgeToken({}), "");
+});
+
+test("resolveBridgeToken: returns empty for an empty or blank value", () => {
+  assert.equal(resolveBridgeToken({ ACMI_BRIDGE_TOKEN: "" }), "");
+  assert.equal(resolveBridgeToken({ ACMI_BRIDGE_TOKEN: "   " }), "");
+});
+
+test("resolveBridgeToken: there is no hardcoded fallback value", () => {
+  // A bundled default bearer would let anyone who reads the source reach the
+  // fleet datastore. The only way to get a token is from the environment.
+  assert.equal(resolveBridgeToken({}), "");
+  assert.equal(resolveBridgeToken({ ACMI_BRIDGE_TOKEN: undefined }), "");
 });

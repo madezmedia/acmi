@@ -61,7 +61,7 @@ npx -y @madezmedia/acmi-mcp
       "args": ["-y", "@madezmedia/acmi-mcp"],
       "env": {
         "ACMI_BRIDGE_URL": "https://acmi-redis-u70402.vm.elestio.app/bridge/exec",
-        "ACMI_BRIDGE_TOKEN": "vm-local-bridge",
+        "ACMI_BRIDGE_TOKEN": "<your-bridge-token>",
         "ACMI_DEFAULT_TENANT": "madez"
       }
     }
