@@ -33,7 +33,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { validateKeySegments, validateJson, isProtectedKey, isBridgeUrl, restEndpoint } from "./mcp-server-helpers.mjs";
+import { validateKeySegments, validateJson, isProtectedKey, isBridgeUrl, restEndpoint, resolveBridgeToken } from "./mcp-server-helpers.mjs";
 import { mkdirSync, writeFileSync } from "fs";
 
 // ─── Connection layer (v2.0 + bridge) ────────────────────────────
@@ -46,8 +46,9 @@ const nativePassword = process.env.ACMI_REDIS_PASSWORD;
 const nativeDb = parseInt(process.env.ACMI_REDIS_DB || "0");
 // Fleet PRIMARY for agents that cannot open TCP:6379/26379 (edge, cloud sandboxes).
 // Polar exec URLs stuffed into UPSTASH_* also count as bridge (no trailing slash).
-const bridgeUrl = process.env.ACMI_BRIDGE_URL || process.env.ACMI_REDIS_BRIDGE_URL || (isBridgeUrl(upstashUrl) ? upstashUrl : "");
-const bridgeToken = process.env.ACMI_BRIDGE_TOKEN || process.env.ACMI_REDIS_BRIDGE_TOKEN || (isBridgeUrl(upstashUrl) ? upstashToken : "") || "vm-local-bridge";
+let bridgeUrl = process.env.ACMI_BRIDGE_URL || process.env.ACMI_REDIS_BRIDGE_URL || (isBridgeUrl(upstashUrl) ? upstashUrl : "");
+// No hardcoded fallback. The bearer comes from the environment only.
+const bridgeToken = resolveBridgeToken() || (isBridgeUrl(upstashUrl) ? upstashToken : "");
 
 const defaultTenant = process.env.ACMI_DEFAULT_TENANT || "madez";
 const allowedTenants = (process.env.ACMI_ALLOWED_TENANTS || "madez").split(",");
@@ -76,6 +77,13 @@ if (nativeHost) {
     console.error(`[acmi-mcp v2.0] native Redis connection failed: ${e.message}`);
     useNative = false;
   }
+}
+
+if (!useNative && bridgeUrl && !bridgeToken) {
+  // Fail closed. A bridge URL without a bearer is a misconfiguration, and
+  // guessing a credential is worse than refusing to start.
+  console.error("[acmi-mcp v2.0] WARNING: ACMI_BRIDGE_URL is set but no bridge token is configured. Set ACMI_BRIDGE_TOKEN.");
+  bridgeUrl = "";
 }
 
 if (!useNative && bridgeUrl) {

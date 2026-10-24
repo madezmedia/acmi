@@ -56,6 +56,28 @@ export function isBridgeUrl(url) {
 }
 
 /**
+ * Resolve the bridge bearer from the environment.
+ *
+ * The bearer must never be hardcoded in this repository. An earlier revision
+ * fell back to a literal that was the live production value, so anyone who
+ * cloned the repo could read and write the fleet datastore. Resolve it from
+ * the environment only, and fail closed when it is absent.
+ *
+ * Returns an empty string when no token is configured. The caller decides
+ * whether that is fatal.
+ */
+export function resolveBridgeToken(env = process.env) {
+  const candidates = [
+    env.ACMI_BRIDGE_TOKEN,
+    env.ACMI_REDIS_BRIDGE_TOKEN,
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim() !== "") return value.trim();
+  }
+  return "";
+}
+
+/**
  * POST target for HTTP Redis REST.
  * Polar exec: strip slashes. Upstash Cloud: keep a trailing slash.
  */

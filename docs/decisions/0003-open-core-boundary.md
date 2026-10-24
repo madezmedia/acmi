@@ -28,7 +28,7 @@ What stays MIT, what becomes commercial, and what is fleet-internal and should l
 | Path | Bucket | Note |
 |---|---|---|
 | `src/**` (client, types, adapters in-memory/upstash/redis, testing) | A | Core SDK. **Fix:** `src/client.ts:236` defaults `tenant_id` to `"madez"`. It should default to `"default"` (or require a value) before the HN launch, because self-hosters should not inherit our tenant. |
-| `mcp/**` (stdio MCP server, tests) | A | Keep. **Fix:** `mcp/smithery.yaml` documents our fleet bridge URL and calls `vm-local-bridge` the "canonical" token value. Replace both with placeholders. |
+| `mcp/**` (stdio MCP server, tests) | A | Keep. **Fix, done 2026-10-21:** the hardcoded bridge bearer is gone from `mcp/`. The token now resolves from the environment only, and the server fails closed when a bridge URL has no token. `mcp/smithery.yaml` and `mcp/README.md` carry placeholders. **Still open:** `mcp/smithery.yaml` documents our fleet bridge hostname. That is an infra detail, not a secret, and it needs a separate decision. |
 | `cli/acmi.mjs`, `cli/conformance.mjs`, `cli/drift-diff.mjs`, `cli/invite-agent.mjs` | A | Keep. `conformance` needs `npm run build` first; the quickstart has to say so. |
 | `cli/rollup-cron.mjs`, `cli/standup-brief.mjs` | A | Generic utilities; keep MIT. |
 | `cli/quota-monitor.mjs` (reads `ZAI_WEEKLY_CAP`) | D | Fleet-specific. Move it out, or generalize it. |
